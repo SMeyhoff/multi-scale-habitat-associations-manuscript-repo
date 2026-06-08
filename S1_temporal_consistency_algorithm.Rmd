@@ -1,0 +1,66 @@
+---
+title: "Supporting Information S1: Temporal Consistency Cloud Filtering Algorithm"
+subtitle: "Multi-scale habitat associations of large grazers in Alberta's foothills"
+author: "anon"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    theme: flatly
+    code_folding: hide
+    self_contained: true
+---
+
+## Overview
+
+PlanetScope imagery is susceptible to cloud and haze contamination that can produce anomalous NDVI values. We took advantage of our high temporal resolution by developing a temporal consistency algorithm that identifies anomalous pixels by comparing each bi-weekly mosaic to its temporal neighbours, using phenologically informed thresholds derived from the pooled 2022--2024 time series.
+
+The algorithm was implemented in Python (NumPy, rasterio) and applied to all PlanetScope NDVI mosaics prior to extraction of camera-level summaries. The full processing script is available at `python/planet_cloud_filtering.ipynb`.
+
+## Algorithm Steps
+
+### Step 1: Bi-weekly Mosaics on a Common Grid
+
+All raw PlanetScope NDVI scenes within each bi-weekly period (e.g., May 01--15, May 16--31, ..., Oct 16--31) were reprojected to a common reference grid defined by the union of annual Hermosilla et al. (2018, 2020) landcover extents (EPSG:3400 [NAD 1983 10TM AEP Forest], 3 m resolution matching PlanetScope's native pixel size). Within each period, multiple scenes were composited by maximum-value aggregation: this is a standard NDVI compositing technique in which the highest observed value at each pixel across the period is retained. Because residual cloud and haze contamination systematically depress NDVI, the per-pixel maximum approximates the cloud-free value and is the more defensible choice than mean or median aggregation for pre-filtering mosaics. NDVI values were subsequently clipped to [0, 1] to exclude non-vegetation surfaces (e.g., water bodies with negative NDVI) from downstream anomaly detection. Pixels falling outside the landcover mask for the corresponding year were set to `NaN`.
+
+### Step 2: Temporal Differences and Phenological Categorisation
+
+For each consecutive pair of bi-weekly mosaics within a year, pixel-wise NDVI differences were computed:
+
+$$\Delta\text{NDVI}_{t \to t+1} = \text{NDVI}_{t+1} - \text{NDVI}_{t}$$
+
+Each transition was categorised by the mean NDVI change across all valid pixels:
+
+- **Green-up**: mean $\Delta$NDVI > 0.05 (vegetation greening)
+- **Senescence**: mean $\Delta$NDVI < --0.05 (vegetation browning)
+- **Stable**: |mean $\Delta$NDVI| $\leq$ 0.05 (plateau period)
+
+These categories reflect the expected phenological direction of NDVI change and determine the stringency of filtering thresholds.
+
+### Step 3: Direction-Dependent Threshold Derivation
+
+Filtering thresholds were derived from the pooled temporal difference distributions across all three years (2022--2024). For computational efficiency on the full grid, each transition's valid-pixel array was sub-sampled on a regular 1-in-100 stride before pooling; at this density the estimated 95th and 98th percentiles are effectively indistinguishable from their full-sample values because the difference distribution is stationary across the stride. The key insight is that cloud contamination produces NDVI changes in the *opposite* direction to the expected phenological trend (e.g., anomalous decreases during green-up). Thresholds are therefore asymmetric:
+
+| Phenological category | Increase threshold | Decrease threshold |
+|---|---|---|
+| Green-up | 98th percentile (lenient) | 95th percentile (strict) |
+| Stable | 95th percentile | 95th percentile |
+| Senescence | 95th percentile (strict) | 98th percentile (lenient) |
+
+The *natural* direction of change receives a lenient threshold (98th percentile), because large changes in the expected direction are likely real phenological variation. The *unnatural* direction receives a strict threshold (95th percentile), because large changes against the phenological trend are more likely to be cloud artifacts.
+
+### Step 4: Temporal Consistency Filtering
+
+For each bi-weekly mosaic, two comparisons were made:
+
+1. **Backward comparison**: $\Delta$NDVI between the current and previous period
+2. **Forward comparison**: $\Delta$NDVI between the next and current period
+
+A pixel was flagged as anomalous if the change exceeded the category-specific threshold in *either* comparison direction. Flagged pixels were set to `NaN`. This bidirectional check ensures that a cloud-affected pixel is detected whether it produces an anomalous spike or dip relative to either temporal neighbour.
+
+For the first period in each year, only forward comparison was available; for the last period, only backward comparison.
+
+### Step 5: Output
+
+Filtered mosaics were saved in the same format and grid as the input mosaics, with cloud-contaminated pixels set to `NaN`. Downstream NDVI extraction (camera-level buffer summaries) used only non-`NaN` pixels, ensuring that cloud-affected areas did not contribute to habitat covariate values.

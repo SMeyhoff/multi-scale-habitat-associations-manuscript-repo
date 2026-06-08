@@ -1,0 +1,3693 @@
+---
+title: "Supporting Information S7: Multi-scale Habitat Association Analysis"
+subtitle: "Scale-of-effect across the growing season for horses, cattle, and elk — full analytical workflow"
+author: "anon"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    code_folding: hide
+    theme: flatly
+    number_sections: true
+    self_contained: true
+---
+
+```{r setup, include=FALSE}
+# ── Working-directory anchor ──
+# This Rmd and its accompanying `input/` and `output/` folders form a
+# self-contained reproducibility bundle. All paths below are resolved
+# relative to the directory this Rmd lives in, so no further working-
+# directory configuration is required.
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 7,
+  cache = FALSE
+)
+
+library(tidyverse)
+library(MASS)       # glm.nb
+library(glmmTMB)    # NB GLMM with random effects
+library(DHARMa)
+library(MuMIn)      # dredge / model.sel
+library(broom.mixed)
+library(parallel)
+library(furrr)      # parallel purrr
+library(colorspace) # color manipulation for gradients
+library(ggnewscale) # multiple color scales in ggplot
+library(patchwork)  # combining ggplots
+library(png)        # read PNG icons for domain bar chart
+library(grid)       # rasterGrob for icon annotation
+library(ggstar)     # geom_star() for global-peak markers (filled star with border)
+library(kableExtra) # colored manuscript table
+library(flextable)  # Word-compatible tables
+library(officer)    # provides fp_border() used by flextable::hline() for styled table borders
+
+# Set up parallel processing
+n_cores <- parallel::detectCores() - 1
+plan(multisession, workers = n_cores)
+
+# Paths (all relative to the SI_review directory that holds this Rmd)
+base_path  <- "."
+data_file  <- file.path(base_path, "input",  "analysis_ready_multiscale.csv")
+output_dir <- file.path(base_path, "output", "scale_analysis")
+fig_dir    <- file.path(output_dir, "figures")
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(fig_dir,    recursive = TRUE, showWarnings = FALSE)
+```
+
+# Key figures
+
+The three subsections below show the central figures of the analysis up front, so that readers do not need to page through ~3,000 lines of analytical code to see the results. The figures are embedded from pre-rendered PNGs that the analytical workflow below produces on each knit; the code that generates them lives in sections 10 (continuous scale-of-effect profiles) and 11 (domain bar charts, under *Summary Tables*). If the PNGs do not yet exist (e.g. on a fresh clone of the repository where the figures have not been committed), each subsection will render a placeholder message.
+
+## Scale-of-effect profiles by covariate
+
+Each of the seven panels below shows the estimated coefficient (log-rate scale) for one habitat covariate as a function of buffer radius, with separate curves per species × month (horse monthly; cattle bimonthly; elk quarterly). Ribbons are 95 % CIs from the fitted multivariate NB GLMMs; non-zero domains are the contiguous buffer ranges where the 95 % CI excludes zero. Multivariate models are shown of the left, univariate on the right. See Section 10 for the code that produces these.
+
+```{r key-fig-scale-of-effect, echo=FALSE, out.width="100%", fig.align="center"}
+scale_effect_paths <- file.path(
+  fig_dir,
+  c("scale_of_effect_NDVI_herb.png",
+    "scale_of_effect_hu.png",
+    "scale_of_effect_p_harvest.png",
+    "scale_of_effect_p_herb.png",
+    "scale_of_effect_p_shrub.png",
+    "scale_of_effect_p_wetland.png",
+    "scale_of_effect_tri.png")
+)
+existing_se <- scale_effect_paths[file.exists(scale_effect_paths)]
+if (length(existing_se) > 0) {
+  knitr::include_graphics(existing_se)
+} else {
+  cat("*Scale-of-effect figures not yet generated. Knit the full document once; the figures will be embedded on subsequent renders.*")
+}
+```
+
+## Domain bar chart — multivariate models (Figure 2 in manuscript)
+
+The domain bar chart summarises every scale-of-effect profile as a set of coloured segments: blue segments mark contiguous buffer ranges with a positive non-zero domain (95 % CI > 0 throughout), red segments mark negative domains, and unmarked ranges indicate CI-crossing zero. Filled diamonds mark the scale of effect within each domain (largest |β|); filled stars mark the global peak across a species × period × covariate profile. Brackets connect same-sign split domains whose peak-scale CIs overlap, indicating statistical indistinguishability in effect magnitude. See §11.4 for code.
+
+```{r key-fig-domain-bars-mv, echo=FALSE, out.width="100%", fig.align="center"}
+domain_mv_path <- file.path(fig_dir, "domain_bar_chart.png")
+if (file.exists(domain_mv_path)) {
+  knitr::include_graphics(domain_mv_path)
+} else {
+  cat("*Multivariate domain bar chart not yet generated. Knit the full document once; the figure will be embedded on subsequent renders.*")
+}
+```
+
+## Domain bar chart — univariate models (SI sensitivity analysis)
+
+To provide exploratory monthly-resolution information on scale of effect dynamics for all three species, we fitted univariate models for each predictor at each spatial extent and month. These models included only a single habitat predictor plus the SAC, effort offset, and strata random effect. For herbaceous NDVI, we fitted bivariate models pairing herbaceous NDVI with proportion herbaceous to maintain interpretability. Monthly univariate models were fitted for horses (May–October), cattle (July–October), and elk (May–October). Univariate models do not control for other landscape predictors and therefore may reflect confounded associations. These results are presented as exploratory context for interpreting temporal dynamics and should not be used for direct inference about habitat associations. To assess agreement between univariate and multivariate inferences, we compared the two analyses for horses (the only species with matching temporal resolution) at both the profile level (sign, peak scale, and 95% CI overlap at the global peak) and the buffer-cell level (sign classification across 672 cells). 
+
+The univariate domain bar chart repeats the domain-based summary but using single-covariate models (each habitat covariate fit alone with only the spatial autocovariate and stratum random intercept retained). The domain bar chart summarises every scale-of-effect profile as a set of coloured segments: blue segments mark contiguous buffer ranges with a positive non-zero domain (95 % CI > 0 throughout), red segments mark negative domains, and unmarked ranges indicate CI-crossing zero. Filled diamonds mark the scale of effect within each domain (largest absolute effect size); filled stars mark the global peak across a species × period × covariate profile. Brackets connect same-sign split domains whose peak-scale CIs overlap, indicating statistical indistinguishability in effect magnitude. 
+
+This tests which scale-of-effect features are driven by the covariate itself versus its co-conditioning on other covariates in the multivariate model. All three species are shown at monthly resolution. See §11.7 for the formal univariate-vs-multivariate agreement analysis (horse).
+
+In evaluating the agreement between multivariate (MV) and univariate (UV) models for horses (the 42 horse profiles with matched temporal structure (6 months × 7 predictors)) the UV analysis reproduced the MV domain sign in 25 of 30 profiles (83%). UV models produced 13% more domains overall (51 vs. 45 in MV models). UV scale of effect within each of the 45 domains that MV models also detected agreed 38% of the time (49% within ±1 buffer), and global peak scales of effect agreed 39% of the time (46% within ±1 buffer). Cell-level agreement across all 672 buffers (6 months * 7 predictors * 16 buffers) agreed on sign 77% of the time. The 23% disagreement was only between null and signed domains; there were no sign reversals (§ 11.7). 
+
+```{r key-fig-domain-bars-uni, echo=FALSE, out.width="100%", fig.align="center"}
+domain_uni_path <- file.path(fig_dir, "domain_bar_chart_univariate.png")
+if (file.exists(domain_uni_path)) {
+  knitr::include_graphics(domain_uni_path)
+} else {
+  cat("*Univariate domain bar chart not yet generated. Knit the full document once; the figure will be embedded on subsequent renders.*")
+}
+```
+
+# Data Preparation
+
+## Load and inspect
+
+```{r load-data}
+dat_raw <- read_csv(data_file, show_col_types = FALSE)
+
+cat("Rows:", nrow(dat_raw), "\n")
+cat("Species:", unique(dat_raw$species), "\n")
+cat("Months:", sort(unique(dat_raw$month)), "\n")
+cat("Scales:", sort(unique(dat_raw$extent_radius_m)), "\n")
+cat("N scales:", n_distinct(dat_raw$extent_radius_m), "\n")
+```
+
+## Define constants
+
+```{r constants}
+# Spatial scales (16 radii)
+all_scales <- sort(unique(dat_raw$extent_radius_m))
+
+# All habitat covariates (7 total)
+habitat_covars <- c("p_herb", "NDVI_herb", "p_shrub", "p_harvest",
+                     "p_wetland", "hu", "tri")
+
+# Covariates eligible for dredging (6 total — NDVI_herb excluded).
+# NDVI_herb cannot be dredged because it contains structural NAs where
+# p_herb = 0, and it must always appear with p_herb in the model to
+# ensure the imputed zeros are interpretable. NDVI_herb is handled
+# exclusively through the substitution procedure (see below).
+dredge_covars <- c("p_herb", "p_shrub", "p_harvest", "p_wetland", "hu", "tri")
+
+# Species-specific covariate budgets (environmental covariates only;
+# SAC, offset, and strata random effect are always included on top of these)
+covar_budget <- list(
+  Horse  = 5,
+  Cattle = 4,
+  Elk    = 2
+)
+
+# Temporal structures
+horse_months  <- 5:10                       # May-Oct monthly
+cattle_bimonthly <- list(                   # Two bimonthly periods
+  "Jul-Aug"  = c(7, 8),
+  "Sep-Oct"  = c(9, 10)
+)
+cattle_univar_months <- 7:10                # Jul-Oct for univariate
+elk_quarterly <- list(                      # Two quarterly periods
+  "May-Jul" = c(5, 6, 7),
+  "Aug-Oct" = c(8, 9, 10)
+)
+elk_univar_months  <- 5:10                  # May-Oct for univariate
+horse_univar_months <- 5:10                 # May-Oct for univariate
+```
+
+## Prepare analysis datasets
+
+### Impute NDVI_herb NAs and exclude HU NAs
+
+```{r prep-data}
+# Drop rows where hu is NA FIRST (edge locations outside IDW interpolation extent)
+# This ensures consistent sample sizes across all downstream analyses.
+n_before_hu <- nrow(dat_raw)
+dat <- dat_raw %>% filter(!is.na(hu))
+cat("Dropped", n_before_hu - nrow(dat), "rows with NA hu values\n")
+
+# Impute NDVI_herb NA to 0
+# Rationale: NA occurs where p_herb = 0 (no herbaceous pixels in buffer).
+# Setting to 0 conflates "no habitat" with "lowest greenness", but p_herb
+# in the same model captures habitat availability independently.
+# This artifact is most pronounced at fine scales.
+dat <- dat %>%
+  mutate(NDVI_herb = replace_na(NDVI_herb, 0))
+
+cat("Remaining rows:", nrow(dat), "\n")
+
+# Verify no remaining NAs in covariates (QA check; suppressed in SI)
+covar_na_check <- dat %>%
+  summarise(across(all_of(habitat_covars), ~sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "covariate", values_to = "n_na")
+invisible(covar_na_check)
+```
+
+### Compute spatial autocovariate (SAC)
+
+The SAC accounts for spatial autocorrelation in detection counts. It is computed
+as the inverse-distance-weighted mean of detection rates at neighbouring cameras
+within a 20 km bandwidth, determined from the semivariogram range (Stage 1 EDA).
+
+```{r compute-sac}
+compute_sac <- function(data, bandwidth_km = 20) {
+  # Compute SAC using inverse-distance-weighted mean of neighbours'
+  # detection rates within a fixed bandwidth.
+  # data must be at the location level (one scale only)
+
+  n <- nrow(data)
+  if (n < 2) return(rep(NA_real_, n))
+
+  coords <- as.matrix(data[, c("longitude", "latitude")])
+  det_rate <- data$n_det / data$camera_days
+
+  # Distance matrix in km (approximate using Euclidean on decimal degrees)
+  # For Alberta foothills (~51°N), 1° lat ≈ 111 km, 1° lon ≈ 70 km
+  lat_km <- coords[, 2] * 111.32
+  lon_km <- coords[, 1] * 111.32 * cos(mean(coords[, 2]) * pi / 180)
+  coords_km <- cbind(lon_km, lat_km)
+  dist_km <- as.matrix(dist(coords_km))
+
+  # IDW within bandwidth: weight = 1/distance, zero weight beyond bandwidth
+  sac_values <- numeric(n)
+  for (i in seq_len(n)) {
+    neighbours <- which(dist_km[i, ] > 0 & dist_km[i, ] <= bandwidth_km)
+    if (length(neighbours) == 0) {
+      sac_values[i] <- NA_real_
+    } else {
+      weights <- 1 / dist_km[i, neighbours]
+      sac_values[i] <- sum(weights * det_rate[neighbours]) / sum(weights)
+    }
+  }
+
+  return(sac_values)
+}
+
+# Compute SAC at the reference scale (location-level; scale doesn't affect coords)
+ref_scale <- all_scales[1]
+
+sac_df <- dat %>%
+  filter(extent_radius_m == ref_scale) %>%
+  group_by(species, year, month) %>%
+  mutate(sac = compute_sac(pick(everything()), bandwidth_km = 20)) %>%
+  ungroup() %>%
+  dplyr::select(location, species, year, month, sac)
+
+# Join SAC back to all scales
+dat <- dat %>%
+  left_join(sac_df, by = c("location", "species", "year", "month"))
+
+cat("SAC NAs:", sum(is.na(dat$sac)), "\n")
+# SAC per-species range summary suppressed in SI (operational diagnostic only;
+# SAC performance is assessed formally in S6: SAC sensitivity analysis).
+```
+
+### Create pooled datasets
+
+```{r pooled-datasets}
+# Function to pool months: sum n_det and camera_days, mean for time-varying covars
+pool_months <- function(data, month_vec, period_label) {
+  data %>%
+    filter(month %in% month_vec) %>%
+    group_by(location, species, year, extent_radius_m, strata, strata_code,
+             latitude, longitude) %>%
+    summarise(
+      n_det = sum(n_det),
+      camera_days = sum(camera_days),
+      # Static covariates: take first (identical across months)
+      p_herb = first(p_herb),
+      p_shrub = first(p_shrub),
+      p_wetland = first(p_wetland),
+      p_harvest = first(p_harvest),
+      tri = first(tri),
+      # Time-varying covariates: mean across pooled months
+      NDVI_herb = mean(NDVI_herb, na.rm = TRUE),
+      hu = mean(hu, na.rm = TRUE),
+      # SAC: mean across pooled months
+      sac = mean(sac, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      log_effort = log(camera_days),
+      period = period_label
+    ) %>%
+    # Drop locations with < 7 total camera days in pooled period
+    filter(camera_days >= 7)
+}
+
+# Cattle bimonthly datasets
+cattle_bimonthly_data <- map2_dfr(
+  cattle_bimonthly,
+  names(cattle_bimonthly),
+  ~ pool_months(filter(dat, species == "Cattle"), .x, .y)
+)
+
+# Elk quarterly datasets (May-Jul, Aug-Oct)
+elk_quarterly_data <- map2_dfr(
+  elk_quarterly,
+  names(elk_quarterly),
+  ~ pool_months(filter(dat, species == "Elk"), .x, .y)
+)
+
+# Quick summary suppressed in SI — operational diagnostic only.
+# Sample sizes and zero-inflation rates are reported in the main text and
+# Table 1 caption; running totals during pooling are not reader-facing.
+```
+
+# Model Fitting Functions
+
+## Core model fitting
+
+```{r model-functions}
+# Fit a single NB GLMM with specified covariates at a given scale
+fit_nb_glmm <- function(data, covars, scale_m, standardize = TRUE) {
+  # Filter to the target scale
+  d <- data %>% filter(extent_radius_m == scale_m)
+
+  if (nrow(d) < 10) return(NULL)
+
+  # Standardize covariates (including SAC)
+  vars_to_scale <- c(covars, "sac")
+  for (v in vars_to_scale) {
+    if (v %in% names(d)) {
+      d[[v]] <- as.numeric(scale(d[[v]]))
+    }
+  }
+
+  # Build formula: n_det ~ covars + sac + offset(log_effort) + (1|strata)
+  fixed_terms <- paste(c(covars, "sac"), collapse = " + ")
+  form <- as.formula(
+    paste0("n_det ~ ", fixed_terms, " + offset(log_effort) + (1|strata)")
+  )
+
+  # Fit with glmmTMB
+  tryCatch({
+    mod <- glmmTMB(form, data = d, family = nbinom2)
+
+    # Check convergence
+    if (!mod$sdr$pdHess) {
+      warning("Non-positive-definite Hessian at scale ", scale_m)
+    }
+
+    return(mod)
+  }, error = function(e) {
+    warning("Model failed at scale ", scale_m, ": ", e$message)
+    return(NULL)
+  })
+}
+
+
+# Fit a univariate NB GLMM (single habitat covariate + SAC)
+fit_univariate <- function(data, covar, scale_m) {
+  fit_nb_glmm(data, covars = covar, scale_m = scale_m)
+}
+
+
+# Extract tidy results from a fitted model
+tidy_model <- function(mod, species, period, scale_m, model_type, covars_in_model) {
+  if (is.null(mod)) {
+    return(tibble(
+      species = species, period = period, extent_radius_m = scale_m,
+      model_type = model_type, covars_in_model = paste(covars_in_model, collapse = "+"),
+      term = NA_character_, estimate = NA_real_, std.error = NA_real_,
+      statistic = NA_real_, p.value = NA_real_, converged = FALSE, AIC = NA_real_
+    ))
+  }
+
+  tryCatch({
+    tidy_out <- broom.mixed::tidy(mod, effects = "fixed", conf.int = TRUE)
+    tidy_out %>%
+      mutate(
+        species = species,
+        period = period,
+        extent_radius_m = scale_m,
+        model_type = model_type,
+        covars_in_model = paste(covars_in_model, collapse = "+"),
+        converged = mod$sdr$pdHess,
+        AIC = AIC(mod)
+      )
+  }, error = function(e) {
+    tibble(
+      species = species, period = period, extent_radius_m = scale_m,
+      model_type = model_type, covars_in_model = paste(covars_in_model, collapse = "+"),
+      term = NA_character_, estimate = NA_real_, std.error = NA_real_,
+      statistic = NA_real_, p.value = NA_real_, converged = FALSE, AIC = NA_real_
+    )
+  })
+}
+```
+
+## DHARMa diagnostics
+
+```{r dharma-functions}
+# Run DHARMa tests on a single model, return summary row
+dharma_check <- function(mod, species, period, scale_m, model_type) {
+  if (is.null(mod)) {
+    return(tibble(
+      species = species, period = period, extent_radius_m = scale_m,
+      model_type = model_type,
+      uniformity_p = NA_real_, dispersion_p = NA_real_, outlier_p = NA_real_,
+      flag = NA
+    ))
+  }
+
+  tryCatch({
+    sim <- simulateResiduals(mod, n = 500, plot = FALSE)
+    unif <- testUniformity(sim, plot = FALSE)
+    disp <- testDispersion(sim, plot = FALSE)
+    outl <- testOutliers(sim, plot = FALSE)
+
+    tibble(
+      species = species, period = period, extent_radius_m = scale_m,
+      model_type = model_type,
+      uniformity_p = unif$p.value,
+      dispersion_p = disp$p.value,
+      outlier_p = outl$p.value,
+      # Flag at alpha = 0.01 to account for multiple testing
+      flag = uniformity_p < 0.01 | dispersion_p < 0.01 | outlier_p < 0.01
+    )
+  }, error = function(e) {
+    tibble(
+      species = species, period = period, extent_radius_m = scale_m,
+      model_type = model_type,
+      uniformity_p = NA_real_, dispersion_p = NA_real_, outlier_p = NA_real_,
+      flag = NA
+    )
+  })
+}
+```
+
+# AIC-based Covariate Selection
+
+## Dredge function
+
+For each species-period, fit all combinations of the specified size from the 6
+dredge-eligible habitat covariates (always including SAC + strata + offset).
+Do this at each of 16 scales. Compute AIC weights within each scale, then sum
+variable importance across scales. Select the top-k covariates.
+
+NDVI_herb is excluded from the dredge because it contains structural NAs (when
+p_herb = 0) and must always co-occur with p_herb in any model. It is handled
+exclusively through the substitution procedure.
+
+```{r dredge-function}
+# Fit all covariate combinations of size k at one scale, return AIC table
+dredge_at_scale <- function(data, k, scale_m, covars_to_dredge) {
+  combos <- combn(covars_to_dredge, k, simplify = FALSE)
+
+  results <- map_dfr(combos, function(covars) {
+    mod <- fit_nb_glmm(data, covars, scale_m)
+    if (is.null(mod)) {
+      return(tibble(
+        covars = paste(sort(covars), collapse = "+"),
+        AIC = NA_real_,
+        extent_radius_m = scale_m
+      ))
+    }
+    tibble(
+      covars = paste(sort(covars), collapse = "+"),
+      AIC = AIC(mod),
+      extent_radius_m = scale_m
+    )
+  })
+
+  # Compute delta AIC and AIC weights within this scale
+  results <- results %>%
+    filter(!is.na(AIC)) %>%
+    mutate(
+      delta_AIC = AIC - min(AIC),
+      aic_weight = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))
+    )
+
+  return(results)
+}
+
+
+# Compute variable importance: sum of AIC weights for models containing each covariate.
+# Uses exact string matching on split covariate names to avoid substring false positives.
+compute_variable_importance <- function(dredge_results, covars_to_dredge) {
+  importance <- map_dfr(covars_to_dredge, function(cv) {
+    # Robust membership check: split on "+" and test exact match
+    containing <- dredge_results %>%
+      filter(map_lgl(covars, ~ cv %in% str_split(.x, "\\+")[[1]]))
+
+    tibble(
+      covariate = cv,
+      cumulative_aic_weight = sum(containing$aic_weight, na.rm = TRUE),
+      n_top_model = sum(containing$delta_AIC == 0, na.rm = TRUE),
+      n_models = nrow(containing)
+    )
+  }) %>%
+    arrange(desc(cumulative_aic_weight))
+
+  return(importance)
+}
+```
+
+# Horse Analysis
+
+## Covariate selection
+
+```{r horse-select, cache=TRUE}
+horse_data <- dat %>% filter(species == "Horse")
+
+# Dredge within each month × scale combination using the 6 dredge-eligible
+# covariates, then aggregate variable importance across all month-scale cells.
+cat("=== Dredging: Horse | Monthly × 16 scales ===\n")
+cat(sprintf("  %d combinations × %d months × %d scales = %d models\n",
+            choose(length(dredge_covars), covar_budget$Horse),
+            length(horse_months), length(all_scales),
+            choose(length(dredge_covars), covar_budget$Horse) *
+              length(horse_months) * length(all_scales)))
+
+horse_dredge_grid <- expand_grid(month = horse_months, scale = all_scales)
+
+horse_dredge_all <- future_pmap_dfr(horse_dredge_grid, function(month, scale) {
+  d <- horse_data %>% filter(month == !!month)
+  res <- dredge_at_scale(d, covar_budget$Horse, scale, dredge_covars)
+  res %>% mutate(month = month)
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+horse_importance <- compute_variable_importance(horse_dredge_all, dredge_covars)
+# Variable-importance rankings are reported formally in Table 1 (§11.1);
+# intermediate printout suppressed here.
+
+# Select top 5 covariates (base model set)
+horse_top5 <- horse_importance$covariate[1:covar_budget$Horse]
+
+# Weakest base covariate = rank 5 (last to make the AIC cut).
+# Fixed across all months for consistent conditioning sets.
+horse_weakest <- horse_importance$covariate[covar_budget$Horse]
+
+# Second-weakest = rank 4 (needed if p_herb not in base for NDVI substitution)
+horse_second_weakest <- horse_importance$covariate[covar_budget$Horse - 1]
+
+# Non-NDVI substitution covariates (from the 6 dredge candidates, those not in base)
+horse_substituted <- setdiff(dredge_covars, horse_top5)
+
+cat("\nHorse base covariates:", paste(horse_top5, collapse = ", "), "\n")
+cat("Horse weakest (to be dropped for substitution):", horse_weakest, "\n")
+cat("Horse second-weakest (for NDVI + p_herb forcing):", horse_second_weakest, "\n")
+cat("Horse non-NDVI substitution covariates:", paste(horse_substituted, collapse = ", "), "\n")
+cat("p_herb in base model:", "p_herb" %in% horse_top5, "\n")
+
+horse_selection <- list(
+  top_covars = horse_top5,
+  importance = horse_importance,
+  dredge_results = horse_dredge_all
+)
+```
+
+## Base models (5 covariates × 6 months × 16 scales)
+
+```{r horse-base, cache=TRUE}
+horse_grid <- expand_grid(
+  month = horse_months,
+  extent_radius_m = all_scales
+)
+
+horse_base_results <- future_pmap_dfr(horse_grid, function(month, extent_radius_m) {
+  d <- horse_data %>% filter(month == !!month)
+  mod <- fit_nb_glmm(d, horse_top5, extent_radius_m)
+  tidy_model(mod, "Horse", month.abb[month], extent_radius_m,
+             "base", horse_top5)
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+cat("Horse base models fitted:", nrow(horse_grid), "\n")
+cat("Converged:",
+    horse_base_results %>%
+      distinct(period, extent_radius_m, converged) %>%
+      pull(converged) %>% sum(na.rm = TRUE),
+    "of", nrow(horse_grid), "\n")
+```
+
+## Substitution models (non-NDVI)
+
+For each month × scale, drop the weakest covariate (fixed across all months)
+from the base 5 and substitute in each excluded non-NDVI covariate one at a time.
+
+```{r horse-substitution, cache=TRUE}
+cat("Horse weakest covariate (fixed across months):", horse_weakest, "\n")
+
+horse_sub_grid <- expand_grid(
+  month = horse_months,
+  extent_radius_m = all_scales,
+  sub_covar = horse_substituted
+)
+
+horse_sub_results <- future_pmap_dfr(horse_sub_grid, function(month, extent_radius_m, sub_covar) {
+  period_label <- month.abb[month]
+
+  # Replace the weakest with the substituted covariate
+  covars_sub <- c(setdiff(horse_top5, horse_weakest), sub_covar)
+
+  d <- horse_data %>% filter(month == !!month)
+  mod <- fit_nb_glmm(d, covars_sub, extent_radius_m)
+  tidy_model(mod, "Horse", period_label, extent_radius_m,
+             paste0("substitution_", sub_covar), covars_sub)
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+cat("Horse non-NDVI substitution models fitted:", nrow(horse_sub_grid), "\n")
+```
+
+## NDVI substitution models
+
+NDVI_herb requires special handling: it must co-occur with p_herb in the model.
+- If p_herb IS in the base set: drop the weakest, substitute NDVI_herb.
+- If p_herb is NOT in the base set: drop the weakest for NDVI_herb AND the
+  second-weakest for p_herb (forcing p_herb in). Model size stays at 5.
+
+```{r horse-ndvi-substitution, cache=TRUE}
+# Determine NDVI substitution covariate set
+if ("p_herb" %in% horse_top5) {
+  # p_herb already present — just swap weakest for NDVI_herb
+  horse_ndvi_covars <- c(setdiff(horse_top5, horse_weakest), "NDVI_herb")
+  cat("NDVI substitution (p_herb in base): dropping", horse_weakest,
+      "for NDVI_herb\n")
+} else {
+  # p_herb absent — swap weakest for NDVI_herb AND second-weakest for p_herb
+  horse_ndvi_covars <- c(
+    setdiff(horse_top5, c(horse_weakest, horse_second_weakest)),
+    "NDVI_herb", "p_herb"
+  )
+  cat("NDVI substitution (p_herb forced): dropping", horse_weakest,
+      "for NDVI_herb and", horse_second_weakest, "for p_herb\n")
+}
+cat("NDVI model covariates:", paste(horse_ndvi_covars, collapse = ", "), "\n")
+
+horse_ndvi_grid <- expand_grid(
+  month = horse_months,
+  extent_radius_m = all_scales
+)
+
+horse_ndvi_results <- future_pmap_dfr(horse_ndvi_grid, function(month, extent_radius_m) {
+  period_label <- month.abb[month]
+  d <- horse_data %>% filter(month == !!month)
+  mod <- fit_nb_glmm(d, horse_ndvi_covars, extent_radius_m)
+  tidy_model(mod, "Horse", period_label, extent_radius_m,
+             "substitution_NDVI_herb", horse_ndvi_covars)
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+cat("Horse NDVI substitution models fitted:", nrow(horse_ndvi_grid), "\n")
+```
+
+## Univariate monthly models (May-Oct)
+
+Univariate models for each non-NDVI covariate, plus bivariate models for
+NDVI_herb (paired with p_herb to maintain interpretability).
+
+```{r horse-univariate, cache=TRUE}
+# --- Regular univariate (6 non-NDVI covariates) ---
+horse_univar_grid <- expand_grid(
+  month = horse_univar_months,
+  extent_radius_m = all_scales,
+  covar = dredge_covars
+)
+
+horse_univar_results <- future_pmap_dfr(horse_univar_grid, function(month, extent_radius_m, covar) {
+  d <- horse_data %>% filter(month == !!month)
+  mod <- fit_univariate(d, covar, extent_radius_m)
+  tidy_model(mod, "Horse", month.abb[month], extent_radius_m,
+             "univariate", covar)
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+cat("Horse regular univariate models fitted:", nrow(horse_univar_grid), "\n")
+
+# --- Bivariate NDVI (NDVI_herb + p_herb) ---
+horse_ndvi_bivar_grid <- expand_grid(
+  month = horse_univar_months,
+  extent_radius_m = all_scales
+)
+
+horse_ndvi_bivar_results <- future_pmap_dfr(horse_ndvi_bivar_grid, function(month, extent_radius_m) {
+  d <- horse_data %>% filter(month == !!month)
+  mod <- fit_nb_glmm(d, c("NDVI_herb", "p_herb"), extent_radius_m)
+  tidy_model(mod, "Horse", month.abb[month], extent_radius_m,
+             "bivariate_NDVI", c("NDVI_herb", "p_herb"))
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+cat("Horse bivariate NDVI models fitted:", nrow(horse_ndvi_bivar_grid), "\n")
+```
+
+## Combine horse results
+
+```{r horse-combine}
+horse_all_results <- bind_rows(
+  horse_base_results %>% mutate(covar_source = "base"),
+  horse_sub_results %>% mutate(covar_source = "substituted"),
+  horse_ndvi_results %>% mutate(covar_source = "substituted"),
+  horse_univar_results %>% mutate(covar_source = "univariate"),
+  # Tag bivariate NDVI as "univariate" for plotting (treated as the
+  # univariate-equivalent for NDVI); only the NDVI_herb coefficient
+  # will be extracted downstream.
+  horse_ndvi_bivar_results %>% mutate(covar_source = "univariate")
+)
+
+# Disabled for JAE submission — intermediate artefact, not used by S1–S6 or Dryad.
+# write_csv(horse_all_results,
+#           file.path(output_dir, "horse_model_results.csv"))
+```
+
+# Cattle Analysis
+
+## Covariate selection (bimonthly)
+
+```{r cattle-select, cache=TRUE}
+cat("=== Dredging: Cattle | 2 periods × 16 scales ===\n")
+cat(sprintf("  %d combinations × %d periods × %d scales = %d models\n",
+            choose(length(dredge_covars), covar_budget$Cattle),
+            length(cattle_bimonthly), length(all_scales),
+            choose(length(dredge_covars), covar_budget$Cattle) *
+              length(cattle_bimonthly) * length(all_scales)))
+
+cattle_dredge_grid <- expand_grid(
+  period = names(cattle_bimonthly),
+  scale = all_scales
+)
+
+cattle_dredge_all <- future_pmap_dfr(cattle_dredge_grid, function(period, scale) {
+  d <- cattle_bimonthly_data %>% filter(period == !!period)
+  res <- dredge_at_scale(d, covar_budget$Cattle, scale, dredge_covars)
+  res %>% mutate(period = period)
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+cattle_importance <- compute_variable_importance(cattle_dredge_all, dredge_covars)
+# Variable-importance rankings are reported formally in Table 1 (§11.1);
+# intermediate printout suppressed here.
+
+cattle_top4 <- cattle_importance$covariate[1:covar_budget$Cattle]
+cattle_weakest <- cattle_importance$covariate[covar_budget$Cattle]
+cattle_second_weakest <- cattle_importance$covariate[covar_budget$Cattle - 1]
+cattle_substituted <- setdiff(dredge_covars, cattle_top4)
+
+cat("\nCattle base covariates:", paste(cattle_top4, collapse = ", "), "\n")
+cat("Cattle weakest:", cattle_weakest, "\n")
+cat("Cattle second-weakest:", cattle_second_weakest, "\n")
+cat("Cattle non-NDVI substitution covariates:", paste(cattle_substituted, collapse = ", "), "\n")
+cat("p_herb in base model:", "p_herb" %in% cattle_top4, "\n")
+
+cattle_selection <- list(
+  top_covars = cattle_top4,
+  importance = cattle_importance,
+  dredge_results = cattle_dredge_all
+)
+```
+
+## Bimonthly base models (4 covariates × 2 periods × 16 scales)
+
+```{r cattle-base, cache=TRUE}
+cattle_bi_grid <- expand_grid(
+  period = names(cattle_bimonthly),
+  extent_radius_m = all_scales
+)
+
+cattle_base_results <- future_pmap_dfr(cattle_bi_grid, function(period, extent_radius_m) {
+  d <- cattle_bimonthly_data %>% filter(period == !!period)
+  mod <- fit_nb_glmm(d, cattle_top4, extent_radius_m)
+  tidy_model(mod, "Cattle", period, extent_radius_m, "base", cattle_top4)
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+cat("Cattle bimonthly base models fitted:", nrow(cattle_bi_grid), "\n")
+```
+
+## Bimonthly substitution models (non-NDVI)
+
+```{r cattle-substitution, cache=TRUE}
+cat("Cattle weakest covariate (fixed across periods):", cattle_weakest, "\n")
+
+cattle_sub_grid <- expand_grid(
+  period = names(cattle_bimonthly),
+  extent_radius_m = all_scales,
+  sub_covar = cattle_substituted
+)
+
+cattle_sub_results <- future_pmap_dfr(cattle_sub_grid, function(period, extent_radius_m, sub_covar) {
+  covars_sub <- c(setdiff(cattle_top4, cattle_weakest), sub_covar)
+  d <- cattle_bimonthly_data %>% filter(period == !!period)
+  mod <- fit_nb_glmm(d, covars_sub, extent_radius_m)
+  tidy_model(mod, "Cattle", period, extent_radius_m,
+             paste0("substitution_", sub_covar), covars_sub)
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+cat("Cattle non-NDVI substitution models fitted:", nrow(cattle_sub_grid), "\n")
+```
+
+## Cattle NDVI substitution models
+
+```{r cattle-ndvi-substitution, cache=TRUE}
+if ("p_herb" %in% cattle_top4) {
+  cattle_ndvi_covars <- c(setdiff(cattle_top4, cattle_weakest), "NDVI_herb")
+  cat("NDVI substitution (p_herb in base): dropping", cattle_weakest,
+      "for NDVI_herb\n")
+} else {
+  cattle_ndvi_covars <- c(
+    setdiff(cattle_top4, c(cattle_weakest, cattle_second_weakest)),
+    "NDVI_herb", "p_herb"
+  )
+  cat("NDVI substitution (p_herb forced): dropping", cattle_weakest,
+      "for NDVI_herb and", cattle_second_weakest, "for p_herb\n")
+}
+cat("NDVI model covariates:", paste(cattle_ndvi_covars, collapse = ", "), "\n")
+
+cattle_ndvi_grid <- expand_grid(
+  period = names(cattle_bimonthly),
+  extent_radius_m = all_scales
+)
+
+cattle_ndvi_results <- future_pmap_dfr(cattle_ndvi_grid, function(period, extent_radius_m) {
+  d <- cattle_bimonthly_data %>% filter(period == !!period)
+  mod <- fit_nb_glmm(d, cattle_ndvi_covars, extent_radius_m)
+  tidy_model(mod, "Cattle", period, extent_radius_m,
+             "substitution_NDVI_herb", cattle_ndvi_covars)
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+cat("Cattle NDVI substitution models fitted:", nrow(cattle_ndvi_grid), "\n")
+```
+
+## Cattle univariate monthly models (Jul-Oct)
+
+```{r cattle-univariate, cache=TRUE}
+# --- Regular univariate (6 non-NDVI covariates) ---
+cattle_univar_grid <- expand_grid(
+  month = cattle_univar_months,
+  extent_radius_m = all_scales,
+  covar = dredge_covars
+)
+
+cattle_univar_results <- future_pmap_dfr(cattle_univar_grid, function(month, extent_radius_m, covar) {
+  d <- dat %>% filter(species == "Cattle", month == !!month)
+  mod <- fit_univariate(d, covar, extent_radius_m)
+  tidy_model(mod, "Cattle", month.abb[month], extent_radius_m,
+             "univariate", covar)
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+cat("Cattle regular univariate models fitted:", nrow(cattle_univar_grid), "\n")
+
+# --- Bivariate NDVI (NDVI_herb + p_herb) ---
+cattle_ndvi_bivar_grid <- expand_grid(
+  month = cattle_univar_months,
+  extent_radius_m = all_scales
+)
+
+cattle_ndvi_bivar_results <- future_pmap_dfr(cattle_ndvi_bivar_grid, function(month, extent_radius_m) {
+  d <- dat %>% filter(species == "Cattle", month == !!month)
+  mod <- fit_nb_glmm(d, c("NDVI_herb", "p_herb"), extent_radius_m)
+  tidy_model(mod, "Cattle", month.abb[month], extent_radius_m,
+             "bivariate_NDVI", c("NDVI_herb", "p_herb"))
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+cat("Cattle bivariate NDVI models fitted:", nrow(cattle_ndvi_bivar_grid), "\n")
+```
+
+## Combine cattle results
+
+```{r cattle-combine}
+cattle_all_results <- bind_rows(
+  cattle_base_results %>% mutate(covar_source = "base"),
+  cattle_sub_results %>% mutate(covar_source = "substituted"),
+  cattle_ndvi_results %>% mutate(covar_source = "substituted"),
+  cattle_univar_results %>% mutate(covar_source = "univariate"),
+  cattle_ndvi_bivar_results %>% mutate(covar_source = "univariate")
+)
+
+# Disabled for JAE submission — intermediate artefact, not used by S1–S6 or Dryad.
+# write_csv(cattle_all_results,
+#           file.path(output_dir, "cattle_model_results.csv"))
+```
+
+# Elk Analysis
+
+## Covariate selection (quarterly)
+
+```{r elk-select, cache=TRUE}
+cat("=== Dredging: Elk | 2 quarterly periods × 16 scales ===\n")
+cat(sprintf("  %d combinations × %d periods × %d scales = %d models\n",
+            choose(length(dredge_covars), covar_budget$Elk),
+            length(elk_quarterly), length(all_scales),
+            choose(length(dredge_covars), covar_budget$Elk) *
+              length(elk_quarterly) * length(all_scales)))
+
+elk_dredge_grid <- expand_grid(
+  period = names(elk_quarterly),
+  scale = all_scales
+)
+
+elk_dredge_all <- future_pmap_dfr(elk_dredge_grid, function(period, scale) {
+  d <- elk_quarterly_data %>% filter(period == !!period)
+  dredge_at_scale(d, covar_budget$Elk, scale, dredge_covars) %>%
+    mutate(period = period)
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+elk_importance <- compute_variable_importance(elk_dredge_all, dredge_covars)
+# Variable-importance rankings are reported formally in Table 1 (§11.1);
+# intermediate printout suppressed here.
+
+elk_top2 <- elk_importance$covariate[1:covar_budget$Elk]
+elk_weakest <- elk_importance$covariate[covar_budget$Elk]
+# For elk (budget = 2), second-weakest = rank 1.
+# If p_herb not in base, forcing both NDVI + p_herb replaces the ENTIRE base.
+elk_second_weakest <- elk_importance$covariate[covar_budget$Elk - 1]
+elk_substituted <- setdiff(dredge_covars, elk_top2)
+
+cat("\nElk base covariates:", paste(elk_top2, collapse = ", "), "\n")
+cat("Elk weakest:", elk_weakest, "\n")
+cat("Elk second-weakest:", elk_second_weakest, "\n")
+cat("Elk non-NDVI substitution covariates:", paste(elk_substituted, collapse = ", "), "\n")
+cat("p_herb in base model:", "p_herb" %in% elk_top2, "\n")
+
+# NOTE: With budget = 2, if p_herb is NOT in the base model and NDVI
+# must be paired with p_herb, the NDVI substitution replaces BOTH base
+# covariates. This means the NDVI estimate has no shared conditioning
+# covariates with the base model — interpret with caution and compare
+# to the bivariate NDVI univariate estimate.
+
+elk_selection <- list(
+  top_covars = elk_top2,
+  importance = elk_importance,
+  dredge_results = elk_dredge_all
+)
+```
+
+## Quarterly base models (2 covariates × 2 periods × 16 scales)
+
+```{r elk-base, cache=TRUE}
+elk_q_grid <- expand_grid(
+  period = names(elk_quarterly),
+  extent_radius_m = all_scales
+)
+
+elk_base_results <- future_pmap_dfr(elk_q_grid, function(period, extent_radius_m) {
+  d <- elk_quarterly_data %>% filter(period == !!period)
+  mod <- fit_nb_glmm(d, elk_top2, extent_radius_m)
+  tidy_model(mod, "Elk", period, extent_radius_m, "base", elk_top2)
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+elk_converged <- elk_base_results %>%
+  distinct(period, extent_radius_m, converged) %>%
+  pull(converged) %>% sum(na.rm = TRUE)
+
+cat("Elk quarterly base models converged:", elk_converged, "of", nrow(elk_q_grid), "\n")
+
+if (elk_converged < nrow(elk_q_grid) * 0.75) {
+  warning("Less than 75% of elk base models converged. Inspect diagnostics carefully.")
+}
+```
+
+## Quarterly substitution models (non-NDVI)
+
+```{r elk-substitution, cache=TRUE}
+cat("Elk weakest covariate (fixed across periods):", elk_weakest, "\n")
+
+elk_sub_grid <- expand_grid(
+  period = names(elk_quarterly),
+  extent_radius_m = all_scales,
+  sub_covar = elk_substituted
+)
+
+elk_sub_results <- future_pmap_dfr(elk_sub_grid, function(period, extent_radius_m, sub_covar) {
+  covars_sub <- c(setdiff(elk_top2, elk_weakest), sub_covar)
+  d <- elk_quarterly_data %>% filter(period == !!period)
+  mod <- fit_nb_glmm(d, covars_sub, extent_radius_m)
+  tidy_model(mod, "Elk", period, extent_radius_m,
+             paste0("substitution_", sub_covar), covars_sub)
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+cat("Elk non-NDVI substitution models fitted:", nrow(elk_sub_grid), "\n")
+```
+
+## Elk NDVI substitution models
+
+```{r elk-ndvi-substitution, cache=TRUE}
+if ("p_herb" %in% elk_top2) {
+  elk_ndvi_covars <- c(setdiff(elk_top2, elk_weakest), "NDVI_herb")
+  cat("NDVI substitution (p_herb in base): dropping", elk_weakest,
+      "for NDVI_herb\n")
+} else {
+  elk_ndvi_covars <- c(
+    setdiff(elk_top2, c(elk_weakest, elk_second_weakest)),
+    "NDVI_herb", "p_herb"
+  )
+  cat("NDVI substitution (p_herb forced): dropping", elk_weakest,
+      "for NDVI_herb and", elk_second_weakest, "for p_herb\n")
+  cat("WARNING: With budget = 2, this replaces the entire base set.\n")
+}
+cat("NDVI model covariates:", paste(elk_ndvi_covars, collapse = ", "), "\n")
+
+elk_ndvi_grid <- expand_grid(
+  period = names(elk_quarterly),
+  extent_radius_m = all_scales
+)
+
+elk_ndvi_results <- future_pmap_dfr(elk_ndvi_grid, function(period, extent_radius_m) {
+  d <- elk_quarterly_data %>% filter(period == !!period)
+  mod <- fit_nb_glmm(d, elk_ndvi_covars, extent_radius_m)
+  tidy_model(mod, "Elk", period, extent_radius_m,
+             "substitution_NDVI_herb", elk_ndvi_covars)
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+cat("Elk NDVI substitution models fitted:", nrow(elk_ndvi_grid), "\n")
+```
+
+## Elk univariate monthly models (May-Oct)
+
+```{r elk-univariate, cache=TRUE}
+# --- Regular univariate (6 non-NDVI covariates) ---
+elk_univar_grid <- expand_grid(
+  month = elk_univar_months,
+  extent_radius_m = all_scales,
+  covar = dredge_covars
+)
+
+elk_univar_results <- future_pmap_dfr(elk_univar_grid, function(month, extent_radius_m, covar) {
+  d <- dat %>% filter(species == "Elk", month == !!month)
+  mod <- fit_univariate(d, covar, extent_radius_m)
+  tidy_model(mod, "Elk", month.abb[month], extent_radius_m,
+             "univariate", covar)
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+cat("Elk regular univariate models fitted:", nrow(elk_univar_grid), "\n")
+
+# --- Bivariate NDVI (NDVI_herb + p_herb) ---
+elk_ndvi_bivar_grid <- expand_grid(
+  month = elk_univar_months,
+  extent_radius_m = all_scales
+)
+
+elk_ndvi_bivar_results <- future_pmap_dfr(elk_ndvi_bivar_grid, function(month, extent_radius_m) {
+  d <- dat %>% filter(species == "Elk", month == !!month)
+  mod <- fit_nb_glmm(d, c("NDVI_herb", "p_herb"), extent_radius_m)
+  tidy_model(mod, "Elk", month.abb[month], extent_radius_m,
+             "bivariate_NDVI", c("NDVI_herb", "p_herb"))
+}, .options = furrr_options(seed = TRUE), .progress = TRUE)
+
+cat("Elk bivariate NDVI models fitted:", nrow(elk_ndvi_bivar_grid), "\n")
+```
+
+## Combine elk results
+
+```{r elk-combine}
+elk_all_results <- bind_rows(
+  elk_base_results %>% mutate(covar_source = "base"),
+  elk_sub_results %>% mutate(covar_source = "substituted"),
+  elk_ndvi_results %>% mutate(covar_source = "substituted"),
+  elk_univar_results %>% mutate(covar_source = "univariate"),
+  elk_ndvi_bivar_results %>% mutate(covar_source = "univariate")
+)
+
+# Disabled for JAE submission — intermediate artefact, not used by S1–S6 or Dryad.
+# write_csv(elk_all_results,
+#           file.path(output_dir, "elk_model_results.csv"))
+```
+
+
+# DHARMa Diagnostics
+
+Run DHARMa on all models and create a summary table with flagging.
+
+**Note:** This section re-fits every model and runs 500 simulations each. For ~2000+
+models this can take several hours. Set `dharma_subset` to TRUE below to run on a
+representative subset (base models only) for faster iteration. Run the full set for
+final reporting.
+
+```{r dharma-all, cache=TRUE}
+# Set to FALSE for full diagnostic run on all models
+dharma_subset <- FALSE
+
+# Re-fit and test a model given the row info from results
+run_dharma_batch <- function(results_df, species_label, monthly_data,
+                             pooled_data = NULL) {
+  # Get unique model specifications
+  model_specs <- results_df %>%
+    distinct(period, extent_radius_m, model_type, covars_in_model) %>%
+    filter(!is.na(covars_in_model))
+
+  cat(sprintf("Running DHARMa for %s: %d models\n", species_label, nrow(model_specs)))
+
+  future_pmap_dfr(model_specs, function(period, extent_radius_m, model_type, covars_in_model) {
+    covars <- str_split(covars_in_model, "\\+")[[1]]
+
+    # Determine which data to use based on period label
+    is_monthly <- period %in% month.abb
+    if (is_monthly) {
+      month_num <- match(period, month.abb)
+      d <- monthly_data %>% filter(month == month_num)
+    } else if (!is.null(pooled_data)) {
+      d <- pooled_data %>% filter(period == !!period)
+    } else {
+      return(dharma_check(NULL, species_label, period, extent_radius_m, model_type))
+    }
+
+    mod <- fit_nb_glmm(d, covars, extent_radius_m)
+    dharma_check(mod, species_label, period, extent_radius_m, model_type)
+  }, .options = furrr_options(seed = TRUE), .progress = TRUE)
+}
+
+# Filter function for subsetting
+filter_for_dharma <- function(results) {
+  if (dharma_subset) {
+    results %>% filter(model_type %in% c("base"))
+  } else {
+    results
+  }
+}
+
+# Run DHARMa for each species
+dharma_horse <- run_dharma_batch(
+  filter_for_dharma(horse_all_results), "Horse",
+  monthly_data = horse_data
+)
+
+dharma_cattle <- run_dharma_batch(
+  filter_for_dharma(cattle_all_results), "Cattle",
+  monthly_data = dat %>% filter(species == "Cattle"),
+  pooled_data = cattle_bimonthly_data
+)
+
+dharma_elk <- run_dharma_batch(
+  filter_for_dharma(elk_all_results), "Elk",
+  monthly_data = dat %>% filter(species == "Elk"),
+  pooled_data = elk_quarterly_data
+)
+
+dharma_all <- bind_rows(dharma_horse, dharma_cattle, dharma_elk)
+
+# Disabled for JAE submission — diagnostic dump, not used by S1–S6 or Dryad.
+# write_csv(dharma_all, file.path(output_dir, "dharma_diagnostics.csv"))
+```
+
+## DHARMa summary
+
+```{r dharma-summary}
+dharma_summary <- dharma_all %>%
+  filter(!is.na(flag)) %>%
+  group_by(species, model_type) %>%
+  summarise(
+    n_models = n(),
+    pct_uniformity_fail = round(100 * mean(uniformity_p < 0.01, na.rm = TRUE), 1),
+    pct_dispersion_fail = round(100 * mean(dispersion_p < 0.01, na.rm = TRUE), 1),
+    pct_outlier_fail    = round(100 * mean(outlier_p < 0.01, na.rm = TRUE), 1),
+    pct_any_fail        = round(100 * mean(flag, na.rm = TRUE), 1),
+    .groups = "drop"
+  )
+
+knitr::kable(dharma_summary,
+             caption = "DHARMa diagnostic failure rates (alpha = 0.01) by species and model type")
+
+flagged <- dharma_all %>%
+  filter(flag == TRUE) %>%
+  arrange(species, period, extent_radius_m)
+
+cat("\nFlagged models:", nrow(flagged), "of", nrow(dharma_all), "\n")
+
+# Per-species / per-model-type breakdown of flagged models is captured in
+# the DHARMa summary kable above and in the exported CSV. Intermediate
+# printout suppressed in SI.
+
+# Disabled for JAE submission — diagnostic dump, not used by S1–S6 or Dryad.
+# write_csv(flagged, file.path(output_dir, "dharma_flagged_models.csv"))
+```
+
+# Results Assembly
+
+Combine all results and prepare data for plotting.
+
+```{r assemble-results}
+all_results <- bind_rows(
+  horse_all_results %>% mutate(species = "Horse"),
+  cattle_all_results %>% mutate(species = "Cattle"),
+  elk_all_results %>% mutate(species = "Elk")
+)
+
+# Disabled for JAE submission — intermediate artefact, not used by S1–S6 or Dryad.
+# write_csv(all_results, file.path(output_dir, "all_model_results.csv"))
+
+# Create a clean plotting dataset: one row per species x period x scale x covariate
+# For base models: keep all habitat covariate coefficients
+# For substitution models: keep ONLY the substituted covariate's coefficient
+# For univariate/bivariate models: keep the focal covariate only
+
+plot_data <- all_results %>%
+  filter(
+    term != "(Intercept)",
+    term != "sac",
+    !is.na(estimate),
+    converged
+  ) %>%
+  mutate(covariate = term)
+
+# For substitution models, identify the TARGET covariate of each substitution.
+# model_type encodes this as "substitution_<covariate_name>".
+# This prevents the bug where a covariate appearing as a companion in a
+# different substitution model (e.g., p_herb forced into the NDVI substitution)
+# produces a duplicate coefficient in the plotting data.
+plot_data <- plot_data %>%
+  mutate(
+    is_sub_target = case_when(
+      covar_source == "substituted" &
+        model_type == paste0("substitution_", covariate) ~ TRUE,
+      TRUE ~ FALSE
+    )
+  ) %>%
+  dplyr::select(species, period, extent_radius_m, covariate, covar_source,
+         is_sub_target, estimate, std.error, conf.low, conf.high,
+         p.value, model_type)
+
+# Filter logic:
+# - From base models: keep all covariate coefficients
+# - From substitution models: keep ONLY the target covariate of that substitution
+#   (not companion covariates like p_herb forced in for NDVI models)
+# - From univariate models: keep the single covariate
+# - From bivariate_NDVI models (tagged as "univariate"): keep only NDVI_herb
+plot_data_clean <- plot_data %>%
+  filter(
+    (covar_source == "base") |
+    (covar_source == "substituted" & is_sub_target) |
+    (covar_source == "univariate" & model_type == "univariate") |
+    (covar_source == "univariate" & model_type == "bivariate_NDVI" &
+       covariate == "NDVI_herb")
+  )
+
+# Disabled for JAE submission — not read by S1–S6 or included in Dryad.
+# write_csv(plot_data_clean, file.path(output_dir, "plot_ready_results.csv"))
+
+cat("Plot-ready results:", nrow(plot_data_clean), "rows\n")
+cat("Covariates represented:", paste(unique(plot_data_clean$covariate), collapse = ", "), "\n")
+```
+
+```{r investigate-flagged}
+# ── SI-trimmed flagged-model audit ──
+# The full version of this chunk (see 02_multiscale_analysis_CI.Rmd in the
+# project root) refits every flagged / implausible model and prints a
+# DHARMa diagnostic panel for each. That output is an internal QA artefact
+# — not a reader-facing result — so the SI reports only the aggregate
+# counts, exports the suspect-model list as a CSV for reproducibility, and
+# then applies the |β| > 10 cleanup.
+
+# ---- 1. Models with implausible estimates (|β| on log-rate scale > 10) ----
+implausible <- plot_data_clean %>%
+  filter(abs(estimate) > 10) %>%
+  dplyr::select(species, period, extent_radius_m, covariate, covar_source,
+                estimate, std.error, p.value)
+
+# ---- 2. Unique suspect models (implausible ∪ DHARMa-flagged) ----
+suspect_models <- bind_rows(
+  implausible %>%
+    distinct(species, period, extent_radius_m, covar_source) %>%
+    mutate(reason = "implausible_estimate"),
+  flagged %>%
+    distinct(species, period, extent_radius_m, model_type) %>%
+    rename(covar_source = model_type) %>%
+    mutate(reason = "dharma_flag")
+) %>%
+  distinct(species, period, extent_radius_m, .keep_all = TRUE)
+
+# ---- 3. Aggregate audit output ----
+cat(sprintf(
+  "Flagged-model audit:\n  Implausible estimates (|β| > 10): %d rows\n  DHARMa-flagged models:            %d rows\n  Unique suspect models (union):    %d rows\n",
+  nrow(implausible), nrow(flagged), nrow(suspect_models)
+))
+
+# ---- 4. Export the suspect-model list ----
+# Disabled for JAE submission — diagnostic dump, not used by S1–S6 or Dryad.
+# write_csv(suspect_models,
+#           file.path(output_dir, "dharma_suspect_models.csv"))
+
+# ---- 5. Drop implausible-β rows from plot data ----
+n_before <- nrow(plot_data_clean)
+plot_data_clean <- plot_data_clean %>% filter(abs(estimate) <= 10)
+cat(sprintf("Cleanup: removed %d rows with |β| > 10 from plot_data_clean.\n",
+            n_before - nrow(plot_data_clean)))
+```
+
+
+# Scale-of-Effect Figures
+
+## Plotting setup
+
+```{r plot-setup, cache=FALSE}
+# Month ordering
+month_order <- c("May", "Jun", "Jul", "Aug", "Sep", "Oct")
+
+# Month palette — strong contrast
+month_pal <- c(
+  "May" = "#FDBF6F",
+  "Jun" = "#FF7F00",
+  "Jul" = "#E31A1C",
+  "Aug" = "#6A3D9A",
+  "Sep" = "#1F78B4",
+  "Oct" = "#33A02C"
+)
+
+# Publication-quality covariate labels
+covar_labels <- c(
+  "p_herb"    = "Proportion herbaceous land cover",
+  "NDVI_herb" = "Herbaceous NDVI (mean)*",
+  "p_shrub"   = "Proportion shrub land cover",
+  "p_harvest" = "Proportion harvest land cover (<15 yr)",
+  "p_wetland" = "Proportion wetland land cover",
+  "hu"        = "Human use intensity (IDW, 1 km resolution)",
+  "tri"       = "Topographic Ruggedness Index (TRI)"
+)
+
+# Scale break labels for log-scaled x-axis
+scale_breaks <- sort(unique(dat_raw$extent_radius_m))
+scale_break_labels <- ifelse(
+  scale_breaks < 1000,
+  paste0(scale_breaks, " m"),
+  paste0(round(scale_breaks / 1000, 1), " km")
+)
+
+# Build model formula lookup for figure subtitles.
+# Each species x covariate maps to the model formula that produced its estimate.
+build_formula_lookup <- function() {
+  lookup <- tibble(species = character(), covariate = character(),
+                   formula_label = character())
+
+  # --- Helper to format covariate list ---
+  fmt <- function(covs) paste(sort(covs), collapse = " + ")
+
+  # === HORSE ===
+  for (cv in horse_top5) {
+    lookup <- bind_rows(lookup, tibble(
+      species = "Horse", covariate = cv,
+      formula_label = paste0("Base: ", fmt(horse_top5), " + SAC")
+    ))
+  }
+  for (cv in horse_substituted) {
+    sub_covs <- c(setdiff(horse_top5, horse_weakest), cv)
+    lookup <- bind_rows(lookup, tibble(
+      species = "Horse", covariate = cv,
+      formula_label = paste0("Sub: ", fmt(sub_covs), " + SAC",
+                             "  [", cv, " replaces ", horse_weakest, "]")
+    ))
+  }
+  lookup <- bind_rows(lookup, tibble(
+    species = "Horse", covariate = "NDVI_herb",
+    formula_label = paste0("Sub: ", fmt(horse_ndvi_covars), " + SAC")
+  ))
+
+  # === CATTLE ===
+  for (cv in cattle_top4) {
+    lookup <- bind_rows(lookup, tibble(
+      species = "Cattle", covariate = cv,
+      formula_label = paste0("Base: ", fmt(cattle_top4), " + SAC")
+    ))
+  }
+  for (cv in cattle_substituted) {
+    sub_covs <- c(setdiff(cattle_top4, cattle_weakest), cv)
+    lookup <- bind_rows(lookup, tibble(
+      species = "Cattle", covariate = cv,
+      formula_label = paste0("Sub: ", fmt(sub_covs), " + SAC",
+                             "  [", cv, " replaces ", cattle_weakest, "]")
+    ))
+  }
+  lookup <- bind_rows(lookup, tibble(
+    species = "Cattle", covariate = "NDVI_herb",
+    formula_label = paste0("Sub: ", fmt(cattle_ndvi_covars), " + SAC")
+  ))
+
+  # === ELK ===
+  for (cv in elk_top2) {
+    lookup <- bind_rows(lookup, tibble(
+      species = "Elk", covariate = cv,
+      formula_label = paste0("Base: ", fmt(elk_top2), " + SAC")
+    ))
+  }
+  for (cv in elk_substituted) {
+    sub_covs <- c(setdiff(elk_top2, elk_weakest), cv)
+    lookup <- bind_rows(lookup, tibble(
+      species = "Elk", covariate = cv,
+      formula_label = paste0("Sub: ", fmt(sub_covs), " + SAC",
+                             "  [", cv, " replaces ", elk_weakest, "]")
+    ))
+  }
+  lookup <- bind_rows(lookup, tibble(
+    species = "Elk", covariate = "NDVI_herb",
+    formula_label = paste0("Sub: ", fmt(elk_ndvi_covars), " + SAC")
+  ))
+
+  return(lookup)
+}
+
+formula_lookup <- build_formula_lookup()
+
+# Prepare plot data with factor levels and 95% CI bounds
+# Using conf.low / conf.high from broom.mixed::tidy(conf.int = TRUE)
+# which provides Wald 95% CIs — used for both ribbons and domain classification
+period_levels <- c(month_order, "Jul-Aug", "Sep-Oct", "May-Jul", "Aug-Oct")
+
+plot_data_clean <- plot_data_clean %>%
+  mutate(
+    period = factor(period, levels = period_levels),
+    ymin = conf.low,
+    ymax = conf.high
+  )
+```
+
+```{r scale-figures, fig.width=14, fig.height=12}
+# Shared log-scaled x-axis specification
+log_x_scale <- scale_x_log10(
+  breaks = scale_breaks,
+  labels = scale_break_labels
+)
+
+# Shared publication theme
+pub_theme <- theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    axis.title = element_text(size = 11),
+    plot.title = element_text(size = 12, face = "bold"),
+    plot.subtitle = element_text(size = 7.5, color = "grey40"),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    legend.text = element_text(size = 9),
+    legend.title = element_text(size = 10)
+  )
+
+
+# --- Helper: build a single species panel ---
+# type = "multivariate" or "univariate"
+build_species_panel <- function(mv_df, uni_df, species_name, covar_name,
+                                y_lims, type, show_x_title = FALSE) {
+
+  # Determine if this covariate is substituted for this species
+  is_sub <- switch(species_name,
+    "Horse"  = !(covar_name %in% horse_top5) &
+               covar_name %in% c(horse_substituted, "NDVI_herb"),
+    "Cattle" = !(covar_name %in% cattle_top4) &
+               covar_name %in% c(cattle_substituted, "NDVI_herb"),
+    "Elk"    = !(covar_name %in% elk_top2) &
+               covar_name %in% c(elk_substituted, "NDVI_herb"),
+    FALSE
+  )
+
+  base_title <- if (is_sub) paste0(species_name, " (sub)") else species_name
+
+  get_subtitle <- function(sp) {
+    lbl <- formula_lookup %>%
+      filter(species == sp, covariate == covar_name) %>%
+      pull(formula_label)
+    if (length(lbl) == 0) return("")
+    return(lbl)
+  }
+
+  if (type == "multivariate") {
+    panel_title <- paste0(base_title, " \u2014 multivariate")
+    panel_subtitle <- get_subtitle(species_name)
+  } else {
+    panel_title <- paste0(base_title, " \u2014 univariate")
+    if (covar_name == "NDVI_herb") {
+      panel_subtitle <- "Bivariate: NDVI_herb + p_herb + SAC"
+    } else {
+      panel_subtitle <- paste0(covar_name, " + SAC")
+    }
+  }
+
+  x_lab <- if (show_x_title) "Spatial extent (buffer radius)" else NULL
+
+  # === MULTIVARIATE PANEL ===
+  if (type == "multivariate") {
+    df <- mv_df
+
+    if (species_name == "Horse") {
+      # Monthly colored lines with ribbons
+      p <- ggplot() +
+        geom_hline(yintercept = 0, color = "grey30", linewidth = 0.6) +
+        {if (nrow(df) > 0)
+          geom_ribbon(data = df,
+                      aes(x = extent_radius_m, ymin = ymin, ymax = ymax,
+                          fill = period, group = period), alpha = 0.12)
+        } +
+        {if (nrow(df) > 0)
+          geom_line(data = df,
+                    aes(x = extent_radius_m, y = estimate,
+                        color = period, group = period), linewidth = 0.9)
+        } +
+        scale_color_manual(values = month_pal, name = "Month") +
+        scale_fill_manual(values = month_pal, guide = "none")
+
+    } else if (species_name == "Cattle") {
+      # Bimonthly: black lines, solid vs dashed
+      p <- ggplot() +
+        geom_hline(yintercept = 0, color = "grey30", linewidth = 0.6) +
+        {if (nrow(df) > 0)
+          geom_ribbon(data = df,
+                      aes(x = extent_radius_m, ymin = ymin, ymax = ymax,
+                          group = period), fill = "grey30", alpha = 0.1)
+        } +
+        {if (nrow(df) > 0)
+          geom_line(data = df,
+                    aes(x = extent_radius_m, y = estimate,
+                        linetype = period, group = period),
+                    color = "black", linewidth = 0.9)
+        } +
+        scale_linetype_manual(
+          values = c("Jul-Aug" = "solid", "Sep-Oct" = "dashed"),
+          name = "Bimonthly")
+
+    } else {
+      # Elk quarterly: grey lines, solid vs dashed
+      p <- ggplot() +
+        geom_hline(yintercept = 0, color = "grey30", linewidth = 0.6) +
+        {if (nrow(df) > 0)
+          geom_ribbon(data = df,
+                      aes(x = extent_radius_m, ymin = ymin, ymax = ymax,
+                          group = period), fill = "grey30", alpha = 0.1)
+        } +
+        {if (nrow(df) > 0)
+          geom_line(data = df,
+                    aes(x = extent_radius_m, y = estimate,
+                        linetype = period, group = period),
+                    color = "grey30", linewidth = 1)
+        } +
+        scale_linetype_manual(
+          values = c("May-Jul" = "solid", "Aug-Oct" = "dashed"),
+          name = "Quarterly")
+    }
+
+  # === UNIVARIATE PANEL ===
+  } else {
+    df <- uni_df
+
+    # All species: monthly colored lines with light ribbons
+    p <- ggplot() +
+      geom_hline(yintercept = 0, color = "grey30", linewidth = 0.6) +
+      {if (nrow(df) > 0)
+        geom_ribbon(data = df,
+                    aes(x = extent_radius_m, ymin = ymin, ymax = ymax,
+                        fill = period, group = period), alpha = 0.10)
+      } +
+      {if (nrow(df) > 0)
+        geom_line(data = df,
+                  aes(x = extent_radius_m, y = estimate,
+                      color = period, group = period), linewidth = 0.7)
+      } +
+      scale_color_manual(values = month_pal, name = "Month") +
+      scale_fill_manual(values = month_pal, guide = "none")
+  }
+
+  # Shared scales and labels
+  p <- p +
+    log_x_scale +
+    coord_cartesian(ylim = y_lims) +
+    labs(title = panel_title, subtitle = panel_subtitle,
+         x = x_lab, y = "Std. coefficient") +
+    pub_theme
+
+  return(p)
+}
+
+
+# --- Main figure function: 3 rows x 2 columns per covariate ---
+plot_covariate <- function(covar_name, plot_df) {
+
+  # Subset data
+  horse_mv  <- plot_df %>% filter(covariate == covar_name, species == "Horse",
+                                   covar_source %in% c("base", "substituted"))
+  horse_uni <- plot_df %>% filter(covariate == covar_name, species == "Horse",
+                                   covar_source == "univariate")
+  cattle_mv  <- plot_df %>% filter(covariate == covar_name, species == "Cattle",
+                                    covar_source %in% c("base", "substituted"))
+  cattle_uni <- plot_df %>% filter(covariate == covar_name, species == "Cattle",
+                                    covar_source == "univariate")
+  elk_mv  <- plot_df %>% filter(covariate == covar_name, species == "Elk",
+                                 covar_source %in% c("base", "substituted"))
+  elk_uni <- plot_df %>% filter(covariate == covar_name, species == "Elk",
+                                 covar_source == "univariate")
+
+  # Guard: return NULL if no data for this covariate
+  all_est <- c(horse_mv$estimate, cattle_mv$estimate, elk_mv$estimate,
+               horse_uni$estimate, cattle_uni$estimate, elk_uni$estimate)
+  if (length(all_est) == 0 || all(is.na(all_est))) return(NULL)
+
+  # Fixed y-axis limits for cross-covariate comparability
+  y_lims <- c(-1, 1)
+
+  # Build 6 panels (3 species x 2 types)
+  p_h_mv  <- build_species_panel(horse_mv, horse_uni, "Horse", covar_name,
+                                  y_lims, "multivariate")
+  p_h_uni <- build_species_panel(horse_mv, horse_uni, "Horse", covar_name,
+                                  y_lims, "univariate")
+  p_c_mv  <- build_species_panel(cattle_mv, cattle_uni, "Cattle", covar_name,
+                                  y_lims, "multivariate")
+  p_c_uni <- build_species_panel(cattle_mv, cattle_uni, "Cattle", covar_name,
+                                  y_lims, "univariate")
+  p_e_mv  <- build_species_panel(elk_mv, elk_uni, "Elk", covar_name,
+                                  y_lims, "multivariate", show_x_title = TRUE)
+  p_e_uni <- build_species_panel(elk_mv, elk_uni, "Elk", covar_name,
+                                  y_lims, "univariate", show_x_title = TRUE)
+
+  # 3 rows x 2 columns, equal widths
+  combined <- (p_h_mv | p_h_uni) /
+              (p_c_mv | p_c_uni) /
+              (p_e_mv | p_e_uni) +
+    plot_annotation(
+      title = covar_labels[covar_name],
+      theme = theme(plot.title = element_text(size = 16, face = "bold"))
+    )
+
+  return(combined)
+}
+
+# Generate all 7 figures
+covar_plots <- map(habitat_covars, ~ plot_covariate(.x, plot_data_clean))
+names(covar_plots) <- habitat_covars
+
+for (cv in habitat_covars) {
+  if (!is.null(covar_plots[[cv]])) {
+    print(covar_plots[[cv]])
+  }
+}
+```
+
+## Save figures
+
+```{r save-figures, cache = FALSE}
+# cache = FALSE so the ggsave() side effect is re-executed on every knit.
+# Global cache = TRUE in the setup chunk would otherwise skip this chunk
+# when its own code is unchanged, even if upstream plot-building chunks
+# have been edited.
+
+fig_dir <- file.path(output_dir, "figures")
+dir.create(fig_dir, showWarnings = FALSE)
+
+for (cv in habitat_covars) {
+  if (!is.null(covar_plots[[cv]])) {
+    ggsave(
+      file.path(fig_dir, paste0("scale_of_effect_", cv, ".png")),
+      covar_plots[[cv]],
+      width = 14, height = 12, dpi = 300
+    )
+  }
+}
+
+cat("Figures saved to:", fig_dir, "\n")
+```
+
+# Summary Tables
+
+## Covariate selection summary
+
+```{r selection-summary}
+# ── 1. Full covariate name lookup (Prop. shorthand) ──
+# Named table_covar_labels to avoid overwriting covar_labels used by figures downstream
+table_covar_labels <- c(
+  tri       = "Terrain ruggedness index",
+  hu        = "Human use",
+  p_harvest = "Prop. harvest cutblock",
+  p_wetland = "Prop. wetland",
+  p_shrub   = "Prop. shrub",
+  p_herb    = "Prop. herbaceous"
+)
+
+# ── 2. Assemble dredge-based rankings ──
+selection_summary <- bind_rows(
+  horse_selection$importance %>% mutate(species = "Horse"),
+  cattle_selection$importance %>% mutate(species = "Cattle"),
+  elk_selection$importance %>% mutate(species = "Elk")
+) %>%
+  group_by(species) %>%
+  mutate(rank = row_number()) %>%
+  ungroup() %>%
+  mutate(
+    budget = case_when(
+      species == "Horse"  ~ covar_budget$Horse,
+      species == "Cattle" ~ covar_budget$Cattle,
+      species == "Elk"    ~ covar_budget$Elk
+    ),
+    is_sub = rank > budget,
+    # Full covariate names; append "(sub.)" for substituted covariates
+    covariate_full = paste0(table_covar_labels[covariate], if_else(is_sub, " (sub.)", ""))
+  )
+
+# ── 3. Determine substitution targets ──
+# Non-base covariates replace the weakest base covariate
+selection_summary <- selection_summary %>%
+  group_by(species) %>%
+  mutate(
+    weakest_base = table_covar_labels[covariate[rank == budget]],
+    substituted_for = if_else(is_sub, weakest_base, "\u2014")
+  ) %>%
+  ungroup()
+
+# ── 4. Add NDVI_herb rows (excluded from dredge, evaluated via substitution) ──
+ndvi_rows <- tibble(
+  species = c("Horse", "Cattle", "Elk"),
+  rank = NA_integer_,
+  covariate = "NDVI_herb",
+  cumulative_aic_weight = NA_real_,
+  n_top_model = NA_integer_,
+  n_models = NA_integer_,
+  budget = c(covar_budget$Horse, covar_budget$Cattle, covar_budget$Elk),
+  is_sub = TRUE,
+  covariate_full = "Herbaceous NDVI (sub.)",
+  weakest_base = NA_character_,
+  substituted_for = c(
+    # Horse: p_herb NOT in base -> drops weakest + second-weakest
+    paste0(table_covar_labels[horse_weakest], " + ", table_covar_labels[horse_second_weakest], "\u2020"),
+    # Cattle: p_herb IS in base -> drops weakest only
+    paste0(table_covar_labels[cattle_weakest], "\u2021"),
+    # Elk: budget = 2, p_herb not in base -> replaces entire base
+    "Entire base model\u00a7"
+  )
+)
+
+# ── 5. Assemble final table ──
+selection_table <- bind_rows(selection_summary, ndvi_rows) %>%
+  arrange(factor(species, levels = c("Horse", "Cattle", "Elk")), rank) %>%
+  mutate(
+    cumulative_aic_weight = round(cumulative_aic_weight, 1),
+    rank = if_else(is.na(rank), "\u2014", as.character(rank))
+  ) %>%
+  dplyr::select(
+    Species = species,
+    Rank = rank,
+    Covariate = covariate_full,
+    `Cumulative AIC weight` = cumulative_aic_weight,
+    `N best model` = n_top_model,
+    `Substituted for` = substituted_for
+  )
+
+# ── 6. Render table with flextable (Word-compatible output) ──
+library(flextable)
+
+# Caption and footnotes as separate strings for clean placement
+table_caption <- paste0(
+  "Table 1. Covariate selection outcomes based on cumulative variable importance (sum of Akaike weights across all models containing a given covariate, aggregated across spatial extents and temporal periods). Six covariates were screened at fixed model complexity equal to each species’ covariate budget; covariates ranked above the budget threshold formed the base model, while those marked (sub.) were evaluated via substitution. Herbaceous NDVI was excluded from the dredge (see Methods) and evaluated exclusively through substitution. "
+)
+
+ft <- flextable(selection_table) %>%
+  # Column widths (inches) — total ~7" for US Letter with 1" margins
+  width(j = "Species", width = 0.7) %>%
+  width(j = "Rank", width = 0.5) %>%
+  width(j = "Covariate", width = 1.8) %>%
+  width(j = "Cumulative AIC weight", width = 1.1) %>%
+  width(j = "N best model", width = 0.8) %>%
+  width(j = "Substituted for", width = 2.1) %>%
+  # Alignment
+  align(j = c("Species", "Covariate", "Substituted for"), align = "left", part = "all") %>%
+  align(j = "Rank", align = "center", part = "all") %>%
+  align(j = c("Cumulative AIC weight", "N best model"), align = "right", part = "all") %>%
+  # Font: Times New Roman 10pt (standard for ecology journals)
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 10, part = "all") %>%
+  fontsize(size = 10, part = "header") %>%
+  bold(part = "header") %>%
+  # Horizontal lines only (clean journal style)
+  border_remove() %>%
+  hline_top(border = fp_border(width = 1.5), part = "header") %>%
+  hline_bottom(border = fp_border(width = 0.5), part = "header") %>%
+  hline_bottom(border = fp_border(width = 1.5), part = "body") %>%
+  # Species group dividers: light line between species blocks
+  hline(i = which(selection_table$Species == "Horse" &
+                    lead(selection_table$Species) == "Cattle"),
+        border = fp_border(width = 0.5, style = "solid")) %>%
+  hline(i = which(selection_table$Species == "Cattle" &
+                    lead(selection_table$Species) == "Elk"),
+        border = fp_border(width = 0.5, style = "solid")) %>%
+  # Suppress repeated species names for cleaner look
+  merge_v(j = "Species") %>%
+  valign(j = "Species", valign = "top") %>%
+  # Replace NA with em-dash
+  colformat_double(na_str = "\u2014", digits = 1) %>%
+  colformat_int(na_str = "\u2014") %>%
+  # Caption
+  set_caption(caption = table_caption) %>%
+  # Footnotes
+  add_footer_lines(values = c(
+    paste0("\u2020 Prop. herbaceous was not in the horse base model; NDVI substitution replaced ",
+           "the weakest (prop. shrub) and second-weakest (prop. wetland), substituting ",
+           "herbaceous NDVI and forcing prop. herbaceous into the model."),
+    paste0("\u2021 Prop. herbaceous was already in the cattle base model; NDVI substitution ",
+           "replaced only the weakest base covariate (prop. wetland)."),
+    paste0("\u00a7 With a covariate budget of 2, forcing both herbaceous NDVI and prop. ",
+           "herbaceous replaced the entire elk base model; the NDVI estimate shares no ",
+           "conditioning covariates with the base model.")
+  )) %>%
+  fontsize(size = 9, part = "footer") %>%
+  font(fontname = "Times New Roman", part = "footer") %>%
+  # Padding
+  padding(padding.top = 2, padding.bottom = 2, part = "body")
+
+ft
+
+# ── 7. Export as standalone Word doc for easy copy-paste ──
+# Disabled for JAE submission — docx convenience file and CSV not used by S1–S6 or Dryad.
+# save_as_docx(ft, path = file.path(output_dir, "Table_1_covariate_selection.docx"))
+# write_csv(selection_table, file.path(output_dir, "covariate_selection_summary.csv"))
+# cat("Table 1 exported to:", file.path(output_dir, "Table_1_covariate_selection.docx"), "\n")
+```
+
+## Domains of Scale
+
+Each scale is classified into one of three domains based on its 95% CI:
+
+- **Positive (+)**: lower CI > 0 (entire CI above zero)
+- **Negative (−)**: upper CI < 0 (entire CI below zero)
+- **Zero (0)**: CI spans zero
+
+Contiguous runs of the same domain sign across the ordered scale continuum
+form a single domain. Within each domain, the **scale of effect** is the
+scale with the largest absolute standardized coefficient. All other scales
+within the domain whose 95% CI overlaps that of the peak are reported as
+**statistically indistinguishable peers** (i.e., we cannot confidently
+distinguish the effect magnitude at those scales from the peak).
+
+```{r domain-classification}
+# ── 1. Classify each scale into a domain sign ──
+# Work only with multivariate models (base + substituted)
+mv_data <- plot_data_clean %>%
+  filter(covar_source %in% c("base", "substituted")) %>%
+  arrange(species, period, covariate, extent_radius_m)
+
+domain_data <- mv_data %>%
+  mutate(
+    # Domain sign based on 95% CI position relative to zero
+    domain_sign = case_when(
+      conf.low > 0  ~ "+",
+      conf.high < 0 ~ "-",
+      TRUE           ~ "0"
+    )
+  )
+
+# ── 2. Identify contiguous domains ──
+# A new domain starts whenever the sign changes across adjacent scales
+# within a species-period-covariate group
+domain_data <- domain_data %>%
+  group_by(species, period, covariate) %>%
+  mutate(
+    sign_change = domain_sign != lag(domain_sign, default = first(domain_sign)),
+    domain_id = cumsum(sign_change)
+  ) %>%
+  ungroup()
+```
+
+```{r domain-summary}
+# ── 3. Summarise each domain ──
+domain_summary <- domain_data %>%
+  group_by(species, period, covariate, domain_id, domain_sign) %>%
+  summarise(
+    n_scales       = n(),
+    scale_min_m    = min(extent_radius_m),
+    scale_max_m    = max(extent_radius_m),
+    # Peak scale: highest absolute coefficient within domain
+    peak_scale_m   = extent_radius_m[which.max(abs(estimate))],
+    peak_estimate  = estimate[which.max(abs(estimate))],
+    peak_se        = std.error[which.max(abs(estimate))],
+    peak_ci_low    = conf.low[which.max(abs(estimate))],
+    peak_ci_high   = conf.high[which.max(abs(estimate))],
+    peak_p         = p.value[which.max(abs(estimate))],
+    .groups = "drop"
+  ) %>%
+  arrange(species, covariate, period, domain_id)
+
+# ── Table render suppressed in SI ──
+# The full domain-by-domain table runs to ~100 rows and is fully
+# represented by (a) the manuscript domain table in §11.3 and (b) the
+# multivariate domain bar chart (Key figures §1.2 / §11.4). The raw
+# per-domain numbers are exported as domain_summary.csv.
+cat(sprintf("Multivariate domain summary: %d rows (see domain_summary.csv for raw values).\n",
+            nrow(domain_summary)))
+```
+
+```{r ci-overlap-peers}
+# ── 4. Find scales with CIs overlapping the peak ──
+# Two intervals [a1, b1] and [a2, b2] overlap iff a1 <= b2 AND a2 <= b1.
+# For each domain, identify all scales whose CI overlaps the peak scale's CI.
+
+# First, add peak CI bounds back to every row within its domain
+domain_with_peak <- domain_data %>%
+  group_by(species, period, covariate, domain_id) %>%
+  mutate(
+    peak_idx       = which.max(abs(estimate)),
+    peak_scale_m   = extent_radius_m[peak_idx],
+    peak_ci_low    = conf.low[peak_idx],
+    peak_ci_high   = conf.high[peak_idx],
+    # Does this scale's CI overlap the peak's CI?
+    overlaps_peak  = (conf.low <= peak_ci_high) & (peak_ci_low <= conf.high),
+    is_peak        = (extent_radius_m == peak_scale_m)
+  ) %>%
+  ungroup()
+
+# Summarise peers per domain
+peer_summary <- domain_with_peak %>%
+  filter(overlaps_peak) %>%
+  group_by(species, period, covariate, domain_id) %>%
+  summarise(
+    domain_sign     = first(domain_sign),
+    peak_scale_m    = first(peak_scale_m),
+    peak_estimate   = estimate[is_peak][1],
+    n_peers         = sum(!is_peak),
+    peer_scales_m   = paste(extent_radius_m[!is_peak], collapse = ", "),
+    all_scales_m    = paste(extent_radius_m, collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  arrange(species, covariate, period)
+
+# ── Table render suppressed in SI ──
+# The per-domain peer-scales table runs to ~80 rows. CI-overlap of peer
+# scales with the peak scale is visualised as connecting brackets in the
+# multivariate domain bar chart (Key figures §1.2 / §11.4). The raw list
+# of peer scales per domain is exported as domain_peer_scales.csv.
+cat(sprintf("Multivariate peer-scale summary: %d domains with one or more CI-overlapping peer scales.\n",
+            nrow(peer_summary)))
+```
+
+## Manuscript table — Domain sign and peak scale of effect (not in manuscript)
+
+Wide-format summary table: one row per period (species grouped by
+`pack_rows`), one column per covariate. Cells show direction (+/−) and
+peak scale. Blue = positive; red = negative; grey = no detectable
+effect. Sign-flipping cells (Horse × human use, Sep and Oct) are
+rendered as two stacked half-cells: blue on top with the fine-scale
+positive peak, red on bottom with the broad-scale negative peak.
+† = multiple non-zero domains; dominant shown.
+
+```{r manuscript-table}
+library(kableExtra)
+
+# ── 1. Peak scale per non-zero domain ──
+peak_per_domain <- domain_with_peak %>%
+  filter(domain_sign != "0") %>%
+  group_by(species, period, covariate, domain_id) %>%
+  summarise(
+    domain_sign  = first(domain_sign),
+    peak_scale_m = extent_radius_m[which.max(abs(estimate))],
+    peak_est     = estimate[which.max(abs(estimate))],
+    .groups      = "drop"
+  )
+
+# ── 2. Count domains per combination, flag sign-flipping ──
+domain_counts <- peak_per_domain %>%
+  group_by(species, period, covariate) %>%
+  summarise(
+    n_nz_domains = n(),
+    n_signs      = n_distinct(domain_sign),
+    .groups      = "drop"
+  )
+
+# ── 3. Helpers ──
+fmt_scale <- function(m) {
+  ifelse(m >= 1000, paste0(round(m / 1000, 1), " km"), paste0(m, " m"))
+}
+
+# Single-value cell: flexbox centres content and fills the full TD height.
+# height:100% works here because every TD has an explicit height set via
+# extra_css in the column_spec loop (step 11).
+make_div <- function(text, bg, fg, bold = TRUE, font_size = "12px") {
+  bld <- if (bold) "font-weight:bold;" else ""
+  paste0(
+    '<div style="height:100%;display:flex;align-items:center;',
+    'justify-content:center;background:', bg, ';color:', fg, ';',
+    bld, 'font-size:', font_size, ';padding:3px 5px;box-sizing:border-box;">',
+    text, '</div>'
+  )
+}
+
+# Flip cell: outer div fills full TD height as a flex column;
+# each half gets flex:1 so they share the height equally.
+# Slightly smaller font (10px) so two lines fit cleanly.
+make_flip_div <- function(pos_text, neg_text) {
+  half <- paste0(
+    'display:flex;align-items:center;justify-content:center;',
+    'flex:1;color:white;font-weight:bold;font-size:10px;padding:2px 4px;'
+  )
+  paste0(
+    '<div style="height:100%;display:flex;flex-direction:column;">',
+    '<div style="background:#0072B2;', half, '">', pos_text, '</div>',
+    '<div style="background:#B22222;', half, '">', neg_text, '</div>',
+    '</div>'
+  )
+}
+
+# ── 4a. Regular cells (no sign-flipping) ──
+dominant_regular <- peak_per_domain %>%
+  left_join(domain_counts, by = c("species", "period", "covariate")) %>%
+  filter(n_signs == 1) %>%
+  group_by(species, period, covariate) %>%
+  slice_max(abs(peak_est), n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(
+    sign_char = ifelse(domain_sign == "+", "+", "\u2212"),
+    raw_text  = paste0(sign_char, fmt_scale(peak_scale_m)),
+    raw_text  = ifelse(n_nz_domains > 1, paste0(raw_text, "\u2020"), raw_text),
+    bg        = ifelse(domain_sign == "+", "#0072B2", "#B22222"),
+    cell      = make_div(raw_text, bg = bg, fg = "white"),
+    cell_sign = domain_sign
+  ) %>%
+  dplyr::select(species, period, covariate, cell, cell_sign)
+
+# ── 4b. Sign-flipping cells — flex-column container, two equal halves ──
+flip_cells <- peak_per_domain %>%
+  left_join(domain_counts, by = c("species", "period", "covariate")) %>%
+  filter(n_signs > 1) %>%
+  group_by(species, period, covariate) %>%
+  summarise(
+    pos_peak_m = peak_scale_m[domain_sign == "+"],
+    neg_peak_m = peak_scale_m[domain_sign == "-"],
+    .groups    = "drop"
+  ) %>%
+  mutate(
+    cell = make_flip_div(
+      pos_text = paste0("+", fmt_scale(pos_peak_m), "\u2020"),
+      neg_text = paste0("\u2212", fmt_scale(neg_peak_m))
+    ),
+    cell_sign = "flip"
+  ) %>%
+  dplyr::select(species, period, covariate, cell, cell_sign)
+
+# ── 5. Combine ──
+all_cells <- bind_rows(dominant_regular, flip_cells)
+
+# ── 6. Covariate display labels ──
+covar_abbrev <- c(
+  "p_herb"    = "Herb. cover",
+  "NDVI_herb" = "Herb. NDVI",
+  "p_shrub"   = "Shrub",
+  "p_harvest" = "Harvest",
+  "p_wetland" = "Wetland",
+  "hu"        = "Human use",
+  "tri"       = "TRI"
+)
+col_labels <- unname(covar_abbrev)
+
+# ── 7. Period ordering ──
+period_order <- c(
+  "May", "Jun", "Jul", "Aug", "Sep", "Oct",
+  "Jul-Aug", "Sep-Oct",
+  "May-Jul",  "Aug-Oct"
+)
+
+# ── 8. Pivot to wide ──
+table_long <- all_cells %>%
+  mutate(
+    species     = factor(species, levels = c("Horse", "Cattle", "Elk")),
+    period      = factor(period,  levels = period_order),
+    covar_short = covar_abbrev[as.character(covariate)]
+  ) %>%
+  arrange(species, period)
+
+cell_wide <- table_long %>%
+  dplyr::select(species, period, covar_short, cell) %>%
+  pivot_wider(names_from  = covar_short, values_from = cell,
+              # Zero-only cells: grey flexbox div, same height/structure as others
+              values_fill = make_div("\u2014", bg = "#F0F0F0",
+                                     fg = "#999999", bold = FALSE)) %>%
+  dplyr::select(species, period, all_of(col_labels))
+
+# ── 9. Display table — Period only (species via pack_rows) ──
+# Horse periods spelled out in full; cattle/elk range periods kept short.
+period_display <- c(
+  "May" = "May",       "Jun" = "June",      "Jul" = "July",
+  "Aug" = "August",    "Sep" = "September", "Oct" = "October",
+  "Jul-Aug" = "Jul\u2013Aug", "Sep-Oct" = "Sep\u2013Oct",
+  "May-Jul" = "May\u2013Jul", "Aug-Oct" = "Aug\u2013Oct"
+)
+table_display <- cell_wide %>%
+  dplyr::select(Period = period, all_of(col_labels)) %>%
+  mutate(Period = period_display[as.character(Period)])
+
+# Plain CSV with HTML stripped
+# Disabled for JAE submission — manuscript-table CSV not used by S1–S6 or Dryad.
+# write_csv(
+#   table_display %>% mutate(across(everything(), ~ gsub("<[^>]+>", "", .x))),
+#   file.path(output_dir, "scale_of_effect_manuscript_table.csv")
+# )
+
+# ── 10. Build kable ──
+tbl <- kbl(
+  table_display,
+  format  = "html",
+  escape  = FALSE,
+  caption = paste0(
+    "Domain sign and peak scale of effect for each species \u00d7 period ",
+    "\u00d7 covariate combination. Peak scale = buffer radius with largest ",
+    "|\u03B2| within the dominant non-zero domain. ",
+    "Blue = positive; red = negative; grey = no detectable effect ",
+    "(95% CI spans zero at all scales). ",
+    "Vertically split cells (Horse \u00d7 human use, September and October): ",
+    "blue (upper) = fine-scale positive peak; red (lower) = broad-scale negative peak. ",
+    "\u2020 = multiple non-zero domains; dominant shown."
+  ),
+  align = rep("c", length(col_labels) + 1)  # all columns centre-justified
+) %>%
+  kable_styling(
+    bootstrap_options = c("condensed"),
+    full_width        = FALSE,
+    font_size         = 13
+  ) %>%
+  pack_rows("Horse",  1, 6, bold = TRUE, hline_after = TRUE) %>%
+  pack_rows("Cattle", 7, 8, bold = TRUE, hline_after = TRUE) %>%
+  pack_rows("Elk",    9, 10, bold = TRUE)
+
+# ── 11. Fix TD dimensions and add hard black borders ──
+# height:44px gives every TD an explicit height so that child divs can
+# use height:100% to fill it completely — this eliminates the white gap
+# around stacked flip-cell divs.
+# width:78px makes all data columns the same width.
+# padding:0 removes default cell padding so divs fill edge-to-edge.
+DATA_CSS <- paste0(
+  "padding:0 !important;",
+  "height:44px !important;",
+  "width:78px !important;",
+  "min-width:78px !important;",
+  "border:1px solid #333 !important;",
+  "vertical-align:middle !important;"
+)
+for (j in seq_along(col_labels)) {
+  tbl <- tbl %>%
+    column_spec(j + 1, extra_css = DATA_CSS)   # +1 for Period column
+}
+# Period column: border only (no fixed width needed)
+tbl <- tbl %>%
+  column_spec(1, extra_css = "border:1px solid #333 !important;")
+
+tbl
+
+# ── 12. Word export via flextable ──
+# kableExtra HTML cannot export to .docx; rebuild from plain text data.
+# Flip cells: two-line text (+peak\n−peak) with purple background —
+# Word does not support split cells, so purple signals sign-flipping.
+
+plain_regular <- peak_per_domain %>%
+  left_join(domain_counts, by = c("species", "period", "covariate")) %>%
+  filter(n_signs == 1) %>%
+  group_by(species, period, covariate) %>%
+  slice_max(abs(peak_est), n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(
+    sign_char = ifelse(domain_sign == "+", "+", "\u2212"),
+    cell_text = paste0(sign_char, fmt_scale(peak_scale_m)),
+    cell_text = ifelse(n_nz_domains > 1, paste0(cell_text, "\u2020"), cell_text),
+    cell_sign = domain_sign
+  ) %>%
+  dplyr::select(species, period, covariate, cell_text, cell_sign)
+
+plain_flip <- peak_per_domain %>%
+  left_join(domain_counts, by = c("species", "period", "covariate")) %>%
+  filter(n_signs > 1) %>%
+  group_by(species, period, covariate) %>%
+  summarise(
+    pos_text = paste0("+",       fmt_scale(peak_scale_m[domain_sign == "+"]), "\u2020"),
+    neg_text = paste0("\u2212",  fmt_scale(peak_scale_m[domain_sign == "-"])),
+    .groups  = "drop"
+  ) %>%
+  mutate(
+    cell_text = paste0(pos_text, "\n", neg_text),
+    cell_sign = "flip"
+  ) %>%
+  dplyr::select(species, period, covariate, cell_text, cell_sign)
+
+all_plain <- bind_rows(plain_regular, plain_flip)
+
+plain_long <- all_plain %>%
+  mutate(
+    species     = factor(species, levels = c("Horse", "Cattle", "Elk")),
+    period      = factor(period,  levels = period_order),
+    covar_short = covar_abbrev[as.character(covariate)]
+  ) %>%
+  arrange(species, period)
+
+plain_cell_wide <- plain_long %>%
+  dplyr::select(species, period, covar_short, cell_text) %>%
+  pivot_wider(names_from  = covar_short, values_from = cell_text,
+              values_fill = "\u2014") %>%
+  dplyr::select(species, period, all_of(col_labels))
+
+plain_sign_wide <- plain_long %>%
+  dplyr::select(species, period, covar_short, cell_sign) %>%
+  pivot_wider(names_from  = covar_short, values_from = cell_sign,
+              values_fill = "0") %>%
+  dplyr::select(species, period, all_of(col_labels))
+
+word_display <- plain_cell_wide %>%
+  mutate(
+    Species = as.character(species),
+    Period  = period_display[as.character(period)]
+  ) %>%
+  dplyr::select(Species, Period, all_of(col_labels))
+
+ft2 <- flextable(word_display) %>%
+  width(j = "Species",   width = 0.65) %>%
+  width(j = "Period",    width = 0.90) %>%
+  width(j = col_labels,  width = 0.78) %>%   # 7 × 0.78" ≈ 5.46"; total ~7.0"
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 9,  part = "body") %>%
+  fontsize(size = 9,  part = "header") %>%
+  bold(part = "header") %>%
+  align(j = "Species", align = "left",   part = "all") %>%
+  align(j = "Period",  align = "center", part = "all") %>%
+  align(j = col_labels, align = "center", part = "all") %>%
+  valign(valign = "center", part = "body") %>%
+  merge_v(j = "Species") %>%
+  valign(j = "Species", valign = "top", part = "body") %>%
+  border_remove() %>%
+  hline_top(border    = fp_border(width = 1.5), part = "header") %>%
+  hline_bottom(border = fp_border(width = 0.75), part = "header") %>%
+  hline_bottom(border = fp_border(width = 1.5), part = "body") %>%
+  hline(i = 6, border = fp_border(width = 0.5, style = "solid"), part = "body") %>%
+  hline(i = 8, border = fp_border(width = 0.5, style = "solid"), part = "body") %>%
+  set_caption(caption = paste0(
+    "Table 2. Domain sign and peak scale of effect for each species \u00d7 period ",
+    "\u00d7 covariate combination. Peak scale = buffer radius with largest |\u03B2| ",
+    "within the dominant non-zero domain. ",
+    "Blue = positive effect; red = negative effect; grey = no detectable effect; ",
+    "purple = sign-flipping (positive at fine, negative at broad scales or vice versa). ",
+    "\u2020 Multiple non-zero domains present; dominant shown."
+  )) %>%
+  add_footer_lines(
+    values = "\u2020 Multiple non-zero domains present; dominant (largest |\u03B2|) shown."
+  ) %>%
+  fontsize(size = 8, part = "footer") %>%
+  font(fontname = "Times New Roman", part = "footer") %>%
+  padding(padding.top = 3, padding.bottom = 3, part = "body")
+
+# Apply per-cell background and font colour
+n_word_rows <- nrow(word_display)
+for (j in seq_along(col_labels)) {
+  col_name <- col_labels[j]
+  signs <- if (col_name %in% names(plain_sign_wide)) plain_sign_wide[[col_name]] else rep("0", n_word_rows)
+  signs[is.na(signs)] <- "0"
+  for (i in seq_len(n_word_rows)) {
+    bg_col <- switch(signs[i],
+      "+"    = "#0072B2",
+      "-"    = "#B22222",
+      "flip" = "#7B5EA7",
+               "#F0F0F0"
+    )
+    fg_col <- if (signs[i] == "0") "#888888" else "white"
+    ft2 <- ft2 %>%
+      bg(i = i,    j = col_name, bg    = bg_col, part = "body") %>%
+      color(i = i, j = col_name, color = fg_col, part = "body")
+  }
+}
+
+# Disabled for JAE submission — docx convenience file, not used by S1–S6 or Dryad.
+# save_as_docx(ft2, path = file.path(output_dir, "Table_2_scale_of_effect.docx"))
+# cat("Table 2 exported to:", file.path(output_dir, "Table_2_scale_of_effect.docx"), "\n")
+```
+
+## Scale-of-effect variability across the growing season (horse) (Table 2 in manuscript)
+
+We summarise how consistent the peak scale of effect is across horse
+monthly profiles (May–October, n = 6). For each covariate the peak is
+the *global peak* of the monthly profile — the scale with the largest |β̂|
+across all non-zero domains (same dominant-domain rule as the
+table in §11.3). We report (i) the number of months with a
+detected non-zero dominant domain, (ii) the range of peak buffer class
+across detections, and (iii) the SD of peak buffer class when three or
+more months contributed. Buffer class indexes the log-spaced scale grid
+(1 = 40 m; 16 = 7223 m; adjacent classes differ by a factor of ~√2 in
+radius). Cattle and elk are excluded from this table because
+their temporal grain (bimonthly and quarterly, respectively) yields at
+most n = 2 periods per covariate, which is insufficient for either a
+range or an SD-based variability estimate to be meaningful.
+
+```{r scale-of-effect-variability}
+# ── Temporal variability of peak buffer class (horse) ──
+# Derives, per covariate for horse only:
+#   - number of months (out of 6) with a non-zero dominant (global)
+#     domain detected
+#   - range of peak buffer class across detected months, on the
+#     log-spaced grid indexed 1 (40 m) to 16 (7223 m)
+#   - SD of peak buffer class, only when n_detected >= 3 (n=2 reduces
+#     to a single pairwise difference, n<=1 has no spread)
+# Inputs (already in memory from §11.2):
+#   - domain_summary: one row per (species, period, covariate, domain)
+#   - scale_breaks:   ordered buffer radii in metres (length 16)
+
+# Global peak per (period, covariate) for horse: the non-zero domain
+# with the largest |peak_estimate|. Mirrors the dominant-domain rule
+# used for the §11.3 manuscript table. Buffer-class index is matched
+# against scale_breaks so that the table uses ordinal units (1–16)
+# rather than raw metres.
+profile_global_peak_horse <- domain_summary %>%
+  dplyr::filter(species == "Horse",
+                domain_sign %in% c("+", "-")) %>%
+  dplyr::group_by(period, covariate) %>%
+  dplyr::slice_max(abs(peak_estimate), n = 1, with_ties = FALSE) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(peak_class = match(peak_scale_m, scale_breaks))
+
+# Display metadata: spelled-out covariate labels and type grouping.
+# Type distinguishes layers that are recomputed per period (temporal)
+# from layers computed once across the study period (static).
+covar_meta <- tibble::tribble(
+  ~covariate,     ~cov_label,                   ~cov_type,
+  "NDVI_herb",    "Herbaceous NDVI",            "Temporal",
+  "hu",           "Human use intensity",        "Temporal",
+  "p_harvest",    "Prop. harvest",              "Static",
+  "p_herb",       "Prop. herbaceous",           "Static",
+  "p_shrub",      "Prop. shrub",                "Static",
+  "p_wetland",    "Prop. wetland",              "Static",
+  "tri",          "Terrain ruggedness index",   "Static"
+)
+
+# Horse has 6 possible monthly periods (May–October). The denominator
+# is fixed at 6 rather than derived from the data to keep the metric
+# well-defined even if a covariate has zero detections across all
+# months (in which case it still shows as "0/6").
+n_horse_periods <- 6L
+
+# Build the covariate grid so that any covariate with zero detections
+# still appears as a row (rendered as "—"). Covariate ordering is
+# inherited from covar_meta.
+soE_variability_horse <- tibble::tibble(covariate = covar_meta$covariate) %>%
+  dplyr::left_join(
+    profile_global_peak_horse %>%
+      dplyr::group_by(covariate) %>%
+      dplyr::summarise(
+        n_detected = dplyr::n(),
+        peak_min   = min(peak_class),
+        peak_max   = max(peak_class),
+        # SD only reported at n >= 3 (see intro prose for rationale)
+        peak_sd    = if (dplyr::n() >= 3) round(stats::sd(peak_class), 2)
+                     else NA_real_,
+        .groups    = "drop"
+      ),
+    by = "covariate"
+  ) %>%
+  dplyr::mutate(n_detected = dplyr::coalesce(n_detected, 0L)) %>%
+  dplyr::left_join(covar_meta, by = "covariate") %>%
+  # Build the compact "Range [SD]" cell. case_when branches are mutually
+  # exclusive by n_detected and then by whether the two peaks at n=2 are
+  # equal (degenerate range).
+  dplyr::mutate(
+    det_rate = sprintf("%d/%d", n_detected, n_horse_periods),
+    range_sd = dplyr::case_when(
+      n_detected == 0             ~ "\u2014",
+      n_detected == 1             ~ as.character(peak_min),
+      n_detected >= 3             ~ sprintf("%d\u2013%d [%.2f]",
+                                            peak_min, peak_max, peak_sd),
+      peak_min == peak_max        ~ paste0(peak_min, "*"),
+      TRUE                        ~ sprintf("%d\u2013%d*",
+                                            peak_min, peak_max)
+    ),
+    cov_label = factor(cov_label, levels = covar_meta$cov_label)
+  ) %>%
+  dplyr::arrange(cov_label) %>%
+  dplyr::select(Covariate             = cov_label,
+                Type             = cov_type,
+                `Months with domain`  = det_rate,
+                `Range [SD]`          = range_sd)
+
+# ── Render table with flextable (Word-compatible output) ──
+# Style matches Tables 1 and 2: Times New Roman 10pt, bold header, thick
+# outer rules + thin header rule, light divider between temporal and
+# static blocks, em-dash for NA. Caption built as a separate string for
+# clean placement.
+table_3_caption <- paste(
+  "Table 3. Scale-of-effect variability across horse monthly profiles",
+  "(May\u2013October, n = 6). Peak buffer class is the log-spaced grid",
+  "index (1 = 40 m, 16 = 7223 m; adjacent classes differ by a factor",
+  "of ~\u221A2 in radius). 'Months with domain' is the number of months",
+  "(of 6) in which a non-zero dominant domain was detected. Range is",
+  "the minimum\u2013maximum peak buffer class across detected months.",
+  "SD is reported in brackets only when three or more months",
+  "contributed; at n = 2, SD reduces to a single pairwise difference",
+  "and is not a variability estimate (flagged with *). Covariate type",
+  "distinguishes temporally varying layers (recalculated monthly) from",
+  "static layers (computed once across the study period). Cattle and",
+  "elk are excluded because their temporal grain yields at most n = 2",
+  "periods per covariate."
+)
+
+ft3 <- flextable(soE_variability_horse) %>%
+  # Column widths (inches) — total ~6" fits comfortably on US Letter
+  width(j = "Covariate",          width = 2.0) %>%
+  width(j = "Type",               width = 1.0) %>%
+  width(j = "Months with domain", width = 1.4) %>%
+  width(j = "Range [SD]",         width = 1.6) %>%
+  # Alignment: text left, numeric-ish centred
+  align(j = c("Covariate", "Type"),  align = "left",   part = "all") %>%
+  align(j = "Months with domain",    align = "center", part = "all") %>%
+  align(j = "Range [SD]",            align = "center", part = "all") %>%
+  # Font: Times New Roman 10pt (standard for ecology journals)
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 10, part = "all") %>%
+  fontsize(size = 10, part = "header") %>%
+  bold(part = "header") %>%
+  # Horizontal rules only (clean journal style)
+  border_remove() %>%
+  hline_top(border    = fp_border(width = 1.5), part = "header") %>%
+  hline_bottom(border = fp_border(width = 0.5), part = "header") %>%
+  hline_bottom(border = fp_border(width = 1.5), part = "body")  %>%
+  # Light divider between the two temporal rows and the five static rows.
+  # Covariate order is fixed by covar_meta: rows 1–2 are temporal
+  # (NDVI_herb, hu); rows 3–7 are static.
+  hline(i = 2, border = fp_border(width = 0.5, style = "solid"),
+        part = "body") %>%
+  # Caption
+  set_caption(caption = table_3_caption) %>%
+  # Footnotes. Use Unicode en-dash/em-dash consistent with body.
+  add_footer_lines(values = c(
+    paste0("* Range shown only; SD not reported because n = 2 detected ",
+           "months reduces to a single pairwise difference and is not a ",
+           "variability estimate."),
+    paste0("\u2014 Covariate had no detected non-zero dominant domain in ",
+           "any month (n = 0).")
+  )) %>%
+  fontsize(size = 9, part = "footer") %>%
+  font(fontname = "Times New Roman", part = "footer") %>%
+  padding(padding.top = 2, padding.bottom = 2, part = "body")
+
+ft3
+
+# ── Export standalone Word doc for easy copy-paste into manuscript ──
+# Disabled for JAE submission — docx convenience file and CSV not used by S1–S6 or Dryad.
+# save_as_docx(ft3,
+#              path = file.path(output_dir,
+#                               "Table_3_scale_of_effect_variability.docx"))
+# cat("Table 3 exported to:",
+#     file.path(output_dir, "Table_3_scale_of_effect_variability.docx"),
+#     "\n")
+
+# Also save the underlying data for external reference.
+# Column names de-spaced for CSV safety.
+# write_csv(
+#   soE_variability_horse %>% dplyr::rename_with(~ gsub(" ", "_", .x)),
+#   file.path(output_dir, "scale_of_effect_variability_horse.csv")
+# )
+# cat("Horse scale-of-effect variability summary saved to:",
+#     file.path(output_dir, "scale_of_effect_variability_horse.csv"), "\n")
+```
+
+## Domain Visualization (Figure 2 in manuscript)
+
+Horizontal bars spanning the scale continuum, coloured by domain sign.
+Diamonds mark the peak scale of effect within each non-zero domain;
+coloured stars (★) mark the global peak; colour matches domain sign (blue/red).
+Species are grouped with visual separation; periods are ordered
+chronologically (earliest at top). Animal silhouette icons identify
+species groups.
+
+```{r domain-bars, fig.width=14, fig.height=16, cache=FALSE}
+# ============================================================================
+# Domain bar chart — refactored from facet_wrap to individual patchwork panels
+# to support: (1) custom legend in 8th position, (2) animal icons per panel,
+# (3) brackets connecting same-sign split-domain peaks, (4) global-peak star markers.
+# ============================================================================
+
+# ── Palettes ──
+# Okabe-Ito colorblind-safe palette: blue (positive), vermillion (negative), grey (zero)
+# Greyscale-distinguishable shades of the canonical Okabe-Ito blue and firebrick:
+# darken the red aggressively (amount = 0.50) so its lightness drops well below the
+# blue's. Lightness (the L in HCL), not alpha or chroma, is what controls grayscale
+# separation — alpha just blends toward the background and preserves the L ratio,
+# chroma changes vividness without moving L. Hue is preserved, so the palette
+# stays colourblind-safe under the common colour vision deficiencies.
+neg_col <- colorspace::darken("#B22222", amount = 0.50)  # very dark firebrick (greyscale-safe)
+pos_col <- "#0072B2"                                     # Okabe-Ito blue (unchanged)
+domain_pal <- c("-" = neg_col, "0" = "grey85", "+" = pos_col)
+
+# ── Y-axis ordering ──
+# Species order top→bottom: Horse, Cattle, Elk.
+# ggplot places the LAST factor level at the top of a discrete y-axis, so
+# the species order is reversed (Elk first, Horse last) and within each
+# species block periods are listed latest-first (earliest period at top).
+species_period_order <- c(
+  # Elk (quarterly) — rows 1–2; earliest at top of Elk block
+  "Elk - Aug-Oct", "Elk - May-Jul",
+  # Cattle (bimonthly) — rows 3–4; earliest at top of Cattle block
+  "Cattle - Sep-Oct", "Cattle - Jul-Aug",
+  # Horse (monthly) — rows 5–10; May at top (pos 10), Oct at bottom of Horse block
+  "Horse - Oct", "Horse - Sep", "Horse - Aug",
+  "Horse - Jul", "Horse - Jun", "Horse - May"
+)
+
+# Period-only labels for annotation between icons and bars.
+# Positioned at x = 28 m (geometric midpoint of icon_xmax and first scale break).
+# These appear in every panel; species names are added separately (left column only).
+period_label_data <- tibble(
+  row_label   = factor(species_period_order, levels = species_period_order),
+  # Order matches species_period_order: Elk (2) → Cattle (2) → Horse (6)
+  # Range periods kept abbreviated; horse single months spelled out.
+  period_text = c("Aug–Oct", "May–Jul",
+                  "Sep–Oct", "Jul–Aug",
+                  "October", "September", "August", "July", "June", "May")
+)
+
+# ── Main bar data (one row per domain) ──
+bar_data <- domain_summary %>%
+  mutate(
+    covar_label = covar_labels[as.character(covariate)],
+    row_label   = paste(species, "-", as.character(period)),
+    row_label   = factor(row_label, levels = species_period_order)
+  ) %>%
+  filter(!is.na(row_label))
+
+# ── Peak classification: regular peaks vs global peak ──
+# When multiple non-zero domains exist for the same species × period × covariate,
+# the domain with the largest |peak estimate| is flagged as the "global peak"
+# and plotted as a coloured star (★) matching the domain sign palette.
+peak_data <- bar_data %>%
+  filter(domain_sign != "0") %>%
+  group_by(species, period, covariate, covar_label) %>%
+  mutate(
+    n_nz_domains   = n(),
+    # Global peak = largest |estimate| across all non-zero domains.
+    # For single-domain profiles this is always the one peak;
+    # for multi-domain profiles it distinguishes the dominant peak from secondary ones.
+    is_global_peak = abs(peak_estimate) == max(abs(peak_estimate))
+  ) %>%
+  ungroup()
+
+regular_peaks <- peak_data %>% filter(!is_global_peak)
+global_peaks  <- peak_data %>% filter(is_global_peak)
+
+# ── Bracket data: connect peaks of same-sign split domains with overlapping CIs ──
+# When a species × period × covariate has multiple non-zero domains of the SAME
+# sign separated by a zero domain, and the peak CIs of those domains overlap,
+# draw a bracket connecting the two peak positions. This communicates that the
+# separated domains are statistically indistinguishable in effect magnitude.
+# All 21/22 such pairs qualify; the sole exception is Elk | May-Jul | p_herb.
+bracket_data <- peak_data %>%
+  filter(domain_sign != "0") %>%
+  group_by(species, period, covariate, covar_label, domain_sign) %>%
+  filter(n() >= 2) %>%                        # must have 2+ same-sign domains
+  arrange(peak_scale_m, .by_group = TRUE) %>%  # order by position for pairing
+  reframe({
+    # For each pair of same-sign domains, check CI overlap
+    pairs <- combn(seq_len(n()), 2, simplify = FALSE)
+    do.call(rbind, lapply(pairs, function(idx) {
+      i <- idx[1]; j <- idx[2]
+      ci_overlap <- peak_ci_low[i] <= peak_ci_high[j] &
+                    peak_ci_low[j] <= peak_ci_high[i]
+      if (ci_overlap) {
+        tibble(
+          row_label = row_label[i],        # same for both (same spp × period)
+          x_start   = peak_scale_m[i],     # left peak
+          x_end     = peak_scale_m[j],     # right peak
+          bracket_sign = domain_sign[i]
+        )
+      } else {
+        tibble()
+      }
+    }))
+  }) %>%
+  ungroup() %>%
+  # Compute y offset: shift bracket above the bar
+  # row_label is a factor — numeric position + offset for bracket height.
+  # Bracket colour matches the domain sign for visual distinction from grey dividers.
+  mutate(
+    y_num  = as.numeric(row_label),
+    y_base = y_num + 0.35,
+    bracket_col = ifelse(bracket_sign == "+", pos_col, neg_col)
+  )
+
+# ── Load animal silhouette icons ──
+# Helper: convert any PNG array to RGBA and set semi-transparent silhouettes.
+# Handles grayscale (1-ch), grayscale+alpha (2-ch), RGB (3-ch), RGBA (4-ch).
+ensure_transparent <- function(img, alpha_value = 0.60) {
+  nr <- dim(img)[1]; nc <- dim(img)[2]
+  nch <- if (is.null(dim(img)[3])) 1L else dim(img)[3]
+
+  # Normalise to 4-channel RGBA
+  rgba <- array(0, dim = c(nr, nc, 4))
+  if (nch == 1) {
+    # Grayscale only — no alpha
+    rgba[,,1] <- rgba[,,2] <- rgba[,,3] <- img
+    rgba[,,4] <- 1
+  } else if (nch == 2) {
+    # Grayscale + alpha (mode LA) — the case for these silhouette PNGs
+    rgba[,,1] <- rgba[,,2] <- rgba[,,3] <- img[,,1]
+    rgba[,,4] <- img[,,2]
+  } else if (nch == 3) {
+    # RGB — no alpha
+    rgba[,,1:3] <- img
+    rgba[,,4]   <- 1
+  } else {
+    # RGBA
+    rgba <- img
+  }
+
+  # Make white/near-white pixels fully transparent; darken the rest to alpha_value
+  white_mask <- rgba[,,1] > 0.9 & rgba[,,2] > 0.9 & rgba[,,3] > 0.9
+  rgba[,,4][white_mask]  <- 0
+  rgba[,,4][!white_mask] <- pmin(rgba[,,4][!white_mask], alpha_value)
+  rgba
+}
+
+# Tint silhouette pixels to a flat RGB colour (0–1 scale per channel).
+# Preserves the alpha mask from ensure_transparent; replaces grayscale with target hue.
+colorize_icon <- function(rgba, r, g, b) {
+  mask <- rgba[,,4] > 0.05   # non-transparent (silhouette) pixels
+  rgba[,,1][mask] <- r
+  rgba[,,2][mask] <- g
+  rgba[,,3][mask] <- b
+  rgba
+}
+
+# Load icons and apply species-specific colours
+#   Horse: warm brown  (#8B4513 saddlebrown)
+#   Cow:   near-black  (#111111)
+#   Elk:   dark grey   (#555555)
+horse_img <- colorize_icon(
+  ensure_transparent(readPNG(file.path(base_path, "input", "horse.png"))),
+  r = 0.361, g = 0.180, b = 0.039   # #5C2E0A — dark chestnut brown
+)
+cow_img <- colorize_icon(
+  ensure_transparent(readPNG(file.path(base_path, "input", "cow.png")), alpha_value = 0.95),
+  r = 0.0, g = 0.0, b = 0.0   # pure black — alpha raised to 0.95 so it composites black, not dark grey
+)
+elk_img <- colorize_icon(
+  ensure_transparent(readPNG(file.path(base_path, "input", "elk.png"))),
+  r = 0.439, g = 0.502, b = 0.565   # #708090 — slate blue-grey
+)
+
+# Icon placement: x in metres (left of data range on log axis), y = species centres.
+# Numeric y values map to discrete factor positions (1 = first level at bottom).
+# Elk rows: 1–2 (centre 1.5), Cattle: 3–4 (centre 3.5), Horse: 5–10 (centre 7.5)
+icon_xmin <- 5.5  # metres — shifted further left to free space for period labels
+icon_xmax <- 11   # metres — narrowed to match leftward shift
+
+# ── Species separator positions ──
+sep_positions <- c(
+  2.5,  # between Elk (positions 1–2) and Cattle (positions 3–4)
+  4.5   # between Cattle (positions 3–4) and Horse (positions 5–10)
+)
+
+# ── Shared axis limits (log10-scale x, consistent across all panels) ──
+# Left limit extended to 4 m (from 7 m) so that species-name annotations at x = 5.5 m
+# fall within the coordinate system and are not dropped. No scale breaks exist below 40 m,
+# so the extra space (4–7 m) is invisible white space that merges with the icon zone.
+x_lims <- c(3.5, max(scale_breaks) * 1.15)
+
+# ── Panel builder ──
+build_domain_panel <- function(cv_label,
+                               show_x_title  = FALSE,
+                               show_y_labels = TRUE) {
+  # Subset data for this covariate
+  d      <- bar_data      %>% filter(covar_label == cv_label)
+  rp     <- regular_peaks %>% filter(covar_label == cv_label)
+  gp     <- global_peaks  %>% filter(covar_label == cv_label)
+  br     <- bracket_data  %>% filter(covar_label == cv_label)
+  br_pos <- br %>% filter(bracket_sign == "+")
+  br_neg <- br %>% filter(bracket_sign == "-")
+
+  p <- ggplot(d, aes(y = row_label)) +
+    # ── Species separator lines ──
+    geom_hline(yintercept = sep_positions, linetype = "solid",
+               colour = "black", linewidth = 0.4) +
+    # ── Domain-span bars (standard hue) ──
+    geom_segment(aes(x = scale_min_m, xend = scale_max_m,
+                     yend = row_label, colour = domain_sign),
+                 linewidth = 4, lineend = "round") +
+    scale_colour_manual(values = domain_pal, guide = "none") +
+    # ── Regular peak markers (filled diamond with black outline — fill matches domain sign) ──
+    # shape 23 = filled diamond; fill = domain colour, colour = black border.
+    # scale_fill_manual below maps domain_sign to domain_pal for both this layer
+    # and any other fill-mapped layers.
+    geom_point(data = rp, aes(x = peak_scale_m, fill = domain_sign),
+               shape = 23, size = 3.2, colour = "black", stroke = 0.9) +
+    scale_fill_manual(values = domain_pal, guide = "none") +
+    # ── Global peak markers (ggstar filled star) ──
+    # geom_star() provides fill + colour (border) aesthetics like shape 23.
+    # fill maps to domain_sign via the existing scale_fill_manual(domain_pal).
+    # starshape = 1 is a regular 5-pointed star.
+    geom_star(data = gp, aes(x = peak_scale_m, y = row_label, fill = domain_sign),
+              starshape = 1, colour = "black", starstroke = 0.9, size = 4.0,
+              inherit.aes = FALSE) +
+    # ── Brackets connecting same-sign split-domain peaks with overlapping CIs ──
+    # Horizontal bracket above the bar connects peak positions across a zero gap,
+    # indicating the two domains are statistically indistinguishable.
+    # ── Positive-sign brackets (blue) ──
+    {if (nrow(br_pos) > 0)
+      list(
+        geom_segment(data = br_pos, aes(x = x_start, xend = x_end,
+                     y = y_base, yend = y_base),
+                     linewidth = 0.9, colour = pos_col,
+                     lineend = "butt", inherit.aes = FALSE),
+        geom_segment(data = br_pos, aes(x = x_start, xend = x_start,
+                     y = y_num + 0.18, yend = y_base),
+                     linewidth = 0.9, colour = pos_col,
+                     inherit.aes = FALSE),
+        geom_segment(data = br_pos, aes(x = x_end, xend = x_end,
+                     y = y_num + 0.18, yend = y_base),
+                     linewidth = 0.9, colour = pos_col,
+                     inherit.aes = FALSE)
+      )
+    else NULL} +
+    # ── Negative-sign brackets (red) ──
+    {if (nrow(br_neg) > 0)
+      list(
+        geom_segment(data = br_neg, aes(x = x_start, xend = x_end,
+                     y = y_base, yend = y_base),
+                     linewidth = 0.9, colour = neg_col,
+                     lineend = "butt", inherit.aes = FALSE),
+        geom_segment(data = br_neg, aes(x = x_start, xend = x_start,
+                     y = y_num + 0.18, yend = y_base),
+                     linewidth = 0.9, colour = neg_col,
+                     inherit.aes = FALSE),
+        geom_segment(data = br_neg, aes(x = x_end, xend = x_end,
+                     y = y_num + 0.18, yend = y_base),
+                     linewidth = 0.9, colour = neg_col,
+                     inherit.aes = FALSE)
+      )
+    else NULL} +
+    # ── Period labels (between icon and bars, all panels) ──
+    # Anchored at x = 30 m with hjust = 1 (right-justified); right edge at 30 m
+    # leaves ~10 m of clear space before the first 40 m bar on the log scale.
+    geom_text(data = period_label_data,
+              aes(x = 30, y = row_label, label = period_text),
+              hjust = 1, size = 3.0, colour = "black",
+              inherit.aes = FALSE) +
+    # ── Animal silhouette icons ──
+    # Icons centred on each species band. Elk occupies rows 1–2 (band 0.5–2.5),
+    # Cattle rows 3–4 (2.5–4.5), Horse rows 5–10 (4.5–10.5). Icon heights are
+    # preserved from the previous horse-at-bottom layout (2.0, 1.4, 1.8 units).
+    annotation_custom(
+      grob = rasterGrob(elk_img, interpolate = TRUE),
+      xmin = icon_xmin, xmax = icon_xmax, ymin = 0.6, ymax = 2.4
+    ) +
+    annotation_custom(
+      grob = rasterGrob(cow_img, interpolate = TRUE),
+      xmin = icon_xmin, xmax = icon_xmax, ymin = 2.8, ymax = 4.2
+    ) +
+    annotation_custom(
+      grob = rasterGrob(horse_img, interpolate = TRUE),
+      xmin = icon_xmin, xmax = icon_xmax, ymin = 6.5, ymax = 8.5
+    ) +
+    # ── Axes and scales ──
+    scale_x_log10(
+      breaks = scale_breaks,
+      labels = scale_break_labels,
+      limits = x_lims
+    ) +
+    scale_y_discrete(drop = FALSE) +
+    coord_cartesian(clip = "off") +
+    labs(
+      title = cv_label,
+      x     = if (show_x_title) "Spatial extent (buffer radius)" else NULL,
+      y     = NULL
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      axis.text.x        = element_text(angle = 45, hjust = 1, size = 9),
+      axis.text.y        = element_blank(),  # replaced by annotate below (species) + geom_text (periods)
+      axis.title         = element_text(size = 13),
+      plot.title         = element_text(size = 13, face = "bold"),
+      panel.grid.minor   = element_blank(),
+      panel.grid.major.y = element_blank(),
+      # Left column needs a wide left margin for species name annotations (placed at
+      # x = 5.5 m, outside the panel which starts at 7 m). 70 pt gives ~55 pt of
+      # space between x = 5.5 m and the figure boundary. Increase further if clipped.
+      plot.margin        = if (show_y_labels) margin(5, 8, 5, 70, "pt")
+                           else margin(5, 8, 5, 5, "pt")
+    )
+
+  # ── Species name labels (all panels) ──
+  # Placed at x = 4.0 m, within x_lims[1] = 3.5 m so scale_x_log10 does not drop it.
+  # Centred vertically at each species group midpoint (Elk: 1.5, Cattle: 3.5, Horse: 7.5).
+  # Appears in every panel; left-column panels have the wider margin but labels render
+  # via coord_cartesian(clip = "off") in both columns.
+  # If clipped in right column, increase plot.margin right or nudge x toward 6.
+  p <- p +
+    annotate("text", x = 4.0, y = 1.5, label = "Elk",
+             hjust = 0.5, vjust = 0.5, size = 3.8, fontface = "bold") +
+    annotate("text", x = 4.0, y = 3.5, label = "Cattle",
+             hjust = 0.5, vjust = 0.5, size = 3.8, fontface = "bold") +
+    annotate("text", x = 4.0, y = 7.5, label = "Horse",
+             hjust = 0.5, vjust = 0.5, size = 3.8, fontface = "bold")
+
+  p
+}
+
+# ── Generate 7 covariate panels ──
+# Sort labels alphabetically to match the original facet_wrap ordering
+sorted_labels <- sort(covar_labels)
+
+# Layout: 4 rows × 2 cols. Panels 6 (bottom of col 2) and 7 (bottom of col 1)
+# need x-axis titles since they sit above the legend / plot edge.
+covar_panels <- lapply(seq_along(sorted_labels), function(i) {
+  build_domain_panel(
+    cv_label      = sorted_labels[i],
+    show_x_title  = i >= 6,         # panels 6 and 7 get x-axis titles
+    show_y_labels = (i %% 2 == 1)   # odd = left column → show y labels
+  )
+})
+
+# ── Legend panel (position 8 — the empty slot in the 4×2 grid) ──
+# Content is shifted +0.5 units right (all x = 0 → 0.5, x = 1.9 → 2.4, etc.)
+# relative to the original to better centre within the panel column.
+# Adjust x positions and xlim together if panel width changes.
+legend_plot <- ggplot() +
+  # --- Domain sign ---
+  annotate("text", x = 0.5, y = 10, label = "Domain sign (95% CI)",
+           fontface = "bold", hjust = 0, size = 4.5) +
+  annotate("segment", x = 0.5, xend = 2.0, y = 9.3, yend = 9.3,
+           colour = pos_col, linewidth = 4.5, lineend = "round") +
+  annotate("text", x = 2.4, y = 9.3, label = "Positive", hjust = 0, size = 3.8) +
+  annotate("segment", x = 0.5, xend = 2.0, y = 8.6, yend = 8.6,
+           colour = neg_col, linewidth = 4.5, lineend = "round") +
+  annotate("text", x = 2.4, y = 8.6, label = "Negative", hjust = 0, size = 3.8) +
+  annotate("segment", x = 0.5, xend = 2.0, y = 7.9, yend = 7.9,
+           colour = "grey85", linewidth = 4.5, lineend = "round") +
+  annotate("text", x = 2.4, y = 7.9, label = "Zero (CI spans zero)",
+           hjust = 0, size = 3.8) +
+  # --- Peak markers ---
+  annotate("text", x = 0.5, y = 7.0, label = "Peak markers",
+           fontface = "bold", hjust = 0, size = 4.5) +
+  # Two diamonds side-by-side: filled with domain colour, black outline — matches plot markers
+  annotate("point", x = 1.05, y = 6.35, shape = 23, size = 4.5,
+           fill = pos_col, colour = "black", stroke = 0.9) +
+  annotate("point", x = 1.45, y = 6.35, shape = 23, size = 4.5,
+           fill = neg_col, colour = "black", stroke = 0.9) +
+  annotate("text", x = 2.4, y = 6.35, label = "Peak within domain (+/\u2212)",
+           hjust = 0, size = 3.8) +
+  # Stars use geom_star() so fill + border render correctly (annotate lacks geom_star support)
+  geom_star(data = tibble(x = c(1.05, 1.45), y = 5.7,
+                          fill = c(pos_col, neg_col)),
+            aes(x = x, y = y, fill = fill),
+            starshape = 1, colour = "black", starstroke = 0.9, size = 4.0,
+            inherit.aes = FALSE) +
+  scale_fill_identity() +
+  annotate("text", x = 2.4, y = 5.7,
+           label = "Global peak (largest |\u03B2|)",
+           hjust = 0, size = 3.8) +
+  # --- Bracket ---
+  annotate("text", x = 0.5, y = 4.8, label = "Cross Domain CI Overlap with Peak",
+           fontface = "bold", hjust = 0, size = 4.5) +
+  # Blue bracket example (positive domains)
+  annotate("segment", x = 0.65, xend = 1.85, y = 4.15, yend = 4.15,
+           linewidth = 0.9, colour = pos_col) +
+  annotate("segment", x = 0.65, xend = 0.65, y = 3.95, yend = 4.15,
+           linewidth = 0.9, colour = pos_col) +
+  annotate("segment", x = 1.85, xend = 1.85, y = 3.95, yend = 4.15,
+           linewidth = 0.9, colour = pos_col) +
+  # Vermillion bracket example (negative domains)
+  annotate("segment", x = 0.65, xend = 1.85, y = 3.45, yend = 3.45,
+           linewidth = 0.9, colour = neg_col) +
+  annotate("segment", x = 0.65, xend = 0.65, y = 3.25, yend = 3.45,
+           linewidth = 0.9, colour = neg_col) +
+  annotate("segment", x = 1.85, xend = 1.85, y = 3.25, yend = 3.45,
+           linewidth = 0.9, colour = neg_col) +
+  annotate("text", x = 2.4, y = 3.75,
+           label = "Split-domain peaks with\noverlapping 95% CIs",
+           hjust = 0, size = 3.8, lineheight = 0.9) +
+  xlim(-0.3, 7) + ylim(2.5, 10.5) +
+  theme_void() +
+  theme(plot.margin = margin(20, 10, 10, 20, "pt"))
+
+# ── Assemble with patchwork ──
+domain_fig <- wrap_plots(c(covar_panels, list(legend_plot)), ncol = 2) +
+  plot_annotation(
+    title = "Scale of Effect Profiles and Domains of Scale",
+    theme = theme(
+      plot.title = element_text(size = 16, face = "bold")
+    )
+  )
+
+domain_fig
+```
+
+```{r save-domain-figure, cache = FALSE}
+# cache = FALSE so the ggsave() side effect is re-executed on every knit.
+# Global cache = TRUE in the setup chunk would otherwise skip this chunk when
+# its own code is unchanged, even if upstream plot chunks have been edited.
+
+# Write to project-relative figures directory
+ggsave(file.path(fig_dir, "domain_bar_chart.png"),
+       plot = domain_fig, width = 14, height = 16, dpi = 300)
+
+cat("Domain bar chart saved to:", fig_dir, "\n")
+```
+
+```{r save-domain-outputs}
+# Save full classified data and summaries
+# Disabled for JAE submission — not used by S1–S6 or Dryad.
+# write_csv(domain_data %>%
+#             dplyr::select(species, period, covariate, extent_radius_m,
+#                    estimate, std.error, conf.low, conf.high, p.value,
+#                    domain_sign, domain_id),
+#           file.path(output_dir, "domain_classification_full.csv"))
+#
+# write_csv(domain_summary,
+#           file.path(output_dir, "domain_summary.csv"))
+#
+# write_csv(peer_summary,
+#           file.path(output_dir, "domain_peer_scales.csv"))
+#
+# cat("Domain outputs saved to:", output_dir, "\n")
+```
+
+## Univariate domain classification and visualization (SI)
+
+Parallel domain classification and visualization applied to the univariate
+model output. Purpose: sensitivity check on the multivariate domain
+structure — comparing univariate and multivariate peaks/domains reveals
+whether the scale-of-effect patterns reported above are driven by the
+specific covariate combinations in the base/substitution models, or
+whether they emerge from the marginal covariate–response relationships
+regardless of multivariate conditioning.
+
+Unlike the multivariate analysis, which pools cattle bimonthly and elk
+quarterly to meet each species' covariate budget, the univariate fits
+operate at monthly resolution for all three species. Because univariate
+models estimate only one habitat covariate at a time, there is no
+events-per-predictor constraint that would require temporal pooling.
+This expands the temporal grid from 10 species × period cells
+(multivariate) to 16 cells (univariate): horse 6 months (May–Oct),
+cattle 4 months (Jul–Oct; May and June excluded from the univariate
+grid), and elk 6 months
+(May–Oct). Direct like-for-like comparison with the multivariate domain
+plot is therefore only possible for horses, whose temporal pooling
+structure is identical across the two analyses.
+
+### Univariate domain tables
+
+```{r univar-domain-classification}
+# ── 1. Classify each scale into a domain sign (univariate models only) ──
+# Uses covar_source == "univariate" from plot_data_clean, which by
+# construction (see the Results Assembly chunk) includes both the regular
+# univariate fits (single non-NDVI covariate + SAC + strata random intercept)
+# and the bivariate NDVI fits (NDVI_herb + p_herb, NDVI_herb coefficient
+# retained only) — both tagged "univariate" during results assembly.
+univ_data <- plot_data_clean %>%
+  filter(covar_source == "univariate") %>%
+  arrange(species, period, covariate, extent_radius_m)
+
+domain_data_uni <- univ_data %>%
+  mutate(
+    # Domain sign based on 95% CI position relative to zero (same rule as §11.2)
+    domain_sign = case_when(
+      conf.low > 0  ~ "+",
+      conf.high < 0 ~ "-",
+      TRUE           ~ "0"
+    )
+  )
+
+# ── 2. Identify contiguous domains ──
+# A new domain starts whenever the sign changes across adjacent scales
+# within a species-period-covariate group.
+domain_data_uni <- domain_data_uni %>%
+  group_by(species, period, covariate) %>%
+  mutate(
+    sign_change = domain_sign != lag(domain_sign, default = first(domain_sign)),
+    domain_id = cumsum(sign_change)
+  ) %>%
+  ungroup()
+```
+
+```{r univar-domain-summary}
+# ── 3. Summarise each domain (univariate) ──
+# Parallel to domain_summary in §11.2; one row per species × period × covariate × domain_id.
+domain_summary_uni <- domain_data_uni %>%
+  group_by(species, period, covariate, domain_id, domain_sign) %>%
+  summarise(
+    n_scales       = n(),
+    scale_min_m    = min(extent_radius_m),
+    scale_max_m    = max(extent_radius_m),
+    # Peak scale of effect: highest absolute coefficient within domain
+    peak_scale_m   = extent_radius_m[which.max(abs(estimate))],
+    peak_estimate  = estimate[which.max(abs(estimate))],
+    peak_se        = std.error[which.max(abs(estimate))],
+    peak_ci_low    = conf.low[which.max(abs(estimate))],
+    peak_ci_high   = conf.high[which.max(abs(estimate))],
+    peak_p         = p.value[which.max(abs(estimate))],
+    .groups = "drop"
+  ) %>%
+  arrange(species, covariate, period, domain_id)
+
+# ── Table render suppressed in SI ──
+# The univariate per-domain table runs to ~150 rows (all three species
+# at monthly resolution). The full scale-of-effect structure is shown
+# in the univariate domain bar chart (Key figures §1.3 / §11.5). Raw
+# per-domain numbers are exported as domain_summary_univariate.csv.
+cat(sprintf("Univariate domain summary: %d rows (see domain_summary_univariate.csv for raw values).\n",
+            nrow(domain_summary_uni)))
+```
+
+```{r univar-peer-summary}
+# ── 4. CI-overlapping peer scales (univariate) ──
+# Mirrors the peer_summary logic in §11.2: within each non-zero domain,
+# identify all buffer scales whose 95% CI overlaps the peak scale's 95% CI.
+# Two intervals [a1, b1] and [a2, b2] overlap iff a1 <= b2 AND a2 <= b1.
+domain_with_peak_uni <- domain_data_uni %>%
+  group_by(species, period, covariate, domain_id) %>%
+  mutate(
+    peak_idx       = which.max(abs(estimate)),
+    peak_scale_m   = extent_radius_m[peak_idx],
+    peak_ci_low    = conf.low[peak_idx],
+    peak_ci_high   = conf.high[peak_idx],
+    overlaps_peak  = (conf.low <= peak_ci_high) & (peak_ci_low <= conf.high),
+    is_peak        = (extent_radius_m == peak_scale_m)
+  ) %>%
+  ungroup()
+
+peer_summary_uni <- domain_with_peak_uni %>%
+  filter(overlaps_peak) %>%
+  group_by(species, period, covariate, domain_id) %>%
+  summarise(
+    domain_sign   = first(domain_sign),
+    peak_scale_m  = first(peak_scale_m),
+    peak_estimate = estimate[is_peak][1],
+    n_peers       = sum(!is_peak),
+    peer_scales_m = paste(extent_radius_m[!is_peak], collapse = ", "),
+    all_scales_m  = paste(extent_radius_m, collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  arrange(species, covariate, period)
+
+# ── Table render suppressed in SI ──
+# The univariate per-domain peer-scales table runs to ~120 rows. CI-overlap
+# of peer scales with the peak scale is visualised as connecting brackets
+# in the univariate domain bar chart (Key figures §1.3 / §11.5). Raw list
+# of peer scales per domain is exported as domain_peer_scales_univariate.csv.
+cat(sprintf("Univariate peer-scale summary: %d domains with one or more CI-overlapping peer scales.\n",
+            nrow(peer_summary_uni)))
+```
+
+### Univariate domain visualization
+
+Horizontal bars spanning the scale continuum, coloured by domain sign.
+Diamonds mark the peak scale of effect within each non-zero domain;
+coloured stars (★) mark the global peak; brackets connect peaks of
+same-sign split domains with overlapping CIs. Structure parallels the
+multivariate bar chart in §11.4, but the y-axis expands from 10
+to 16 rows to accommodate monthly resolution for cattle (Jul–Oct) and
+elk (May–Oct).
+
+```{r univar-domain-bars, fig.width=14, fig.height=22, cache=FALSE}
+# ============================================================================
+# Univariate domain bar chart — parallel to the multivariate Figure 2 (§11.4).
+# Reuses global objects from §11.4 (domain_pal, horse_img, cow_img, elk_img,
+# scale_breaks, scale_break_labels, x_lims, icon_xmin, icon_xmax, legend_plot,
+# covar_labels) so the visual style is identical. Only the row ordering,
+# separator positions, icon y-anchors, and data objects differ.
+# ============================================================================
+
+# ── Y-axis ordering (univariate: 16 rows) ──
+# Species order top→bottom: Horse, Cattle, Elk.
+# ggplot places the LAST factor level at the top of a discrete y-axis,
+# so the species order is reversed (Elk first, Horse last) and within
+# each species block periods are listed latest-first (earliest month at top).
+species_period_order_uni <- c(
+  # Elk (monthly, May–Oct) — rows 1–6 (bottom block)
+  "Elk - Oct", "Elk - Sep", "Elk - Aug",
+  "Elk - Jul", "Elk - Jun", "Elk - May",
+  # Cattle (univariate monthly, Jul–Oct only) — rows 7–10
+  "Cattle - Oct", "Cattle - Sep", "Cattle - Aug", "Cattle - Jul",
+  # Horse (monthly, May–Oct) — rows 11–16 (top block)
+  "Horse - Oct", "Horse - Sep", "Horse - Aug",
+  "Horse - Jul", "Horse - Jun", "Horse - May"
+)
+
+# Period-only labels (shown in every panel between icons and bars).
+# Full month names since all periods are single months.
+period_label_data_uni <- tibble(
+  row_label   = factor(species_period_order_uni, levels = species_period_order_uni),
+  period_text = c("October", "September", "August",
+                  "July", "June", "May",
+                  "October", "September", "August", "July",
+                  "October", "September", "August",
+                  "July", "June", "May")
+)
+
+# ── Main bar data (one row per domain) ──
+# Note: period in domain_summary_uni is a month abbreviation ("May", "Jun", ...).
+# paste("Horse", "-", "May") → "Horse - May" matches species_period_order_uni.
+bar_data_uni <- domain_summary_uni %>%
+  mutate(
+    covar_label = covar_labels[as.character(covariate)],
+    row_label   = paste(species, "-", as.character(period)),
+    row_label   = factor(row_label, levels = species_period_order_uni)
+  ) %>%
+  filter(!is.na(row_label))   # drops any period not in the univariate grid
+
+# ── Peak classification: regular peaks vs global peak ──
+peak_data_uni <- bar_data_uni %>%
+  filter(domain_sign != "0") %>%
+  group_by(species, period, covariate, covar_label) %>%
+  mutate(
+    n_nz_domains   = n(),
+    is_global_peak = abs(peak_estimate) == max(abs(peak_estimate))
+  ) %>%
+  ungroup()
+
+regular_peaks_uni <- peak_data_uni %>% filter(!is_global_peak)
+global_peaks_uni  <- peak_data_uni %>% filter(is_global_peak)
+
+# ── Bracket data: connect peaks of same-sign split domains with overlapping CIs ──
+bracket_data_uni <- peak_data_uni %>%
+  filter(domain_sign != "0") %>%
+  group_by(species, period, covariate, covar_label, domain_sign) %>%
+  filter(n() >= 2) %>%                        # must have 2+ same-sign domains
+  arrange(peak_scale_m, .by_group = TRUE) %>%
+  reframe({
+    pairs <- combn(seq_len(n()), 2, simplify = FALSE)
+    do.call(rbind, lapply(pairs, function(idx) {
+      i <- idx[1]; j <- idx[2]
+      ci_overlap <- peak_ci_low[i] <= peak_ci_high[j] &
+                    peak_ci_low[j] <= peak_ci_high[i]
+      if (ci_overlap) {
+        tibble(
+          row_label = row_label[i],
+          x_start   = peak_scale_m[i],
+          x_end     = peak_scale_m[j],
+          bracket_sign = domain_sign[i]
+        )
+      } else {
+        tibble()
+      }
+    }))
+  }) %>%
+  ungroup() %>%
+  mutate(
+    y_num       = as.numeric(row_label),
+    y_base      = y_num + 0.35,
+    bracket_col = ifelse(bracket_sign == "+", "#0072B2", "#B22222")
+  )
+
+# ── Species separator positions (univariate grid) ──
+# Between Elk (rows 1–6) and Cattle (rows 7–10): 6.5
+# Between Cattle (rows 7–10) and Horse (rows 11–16): 10.5
+sep_positions_uni <- c(6.5, 10.5)
+
+# ── Panel builder (univariate) ──
+# Mirrors build_domain_panel() from §11.4 but points to the _uni data objects
+# and uses the expanded species-group row midpoints for icon/annotation anchors:
+#   Elk rows    1–6   → centre 3.5  → icon ymin 2.5,  ymax 4.5
+#   Cattle rows 7–10  → centre 8.5  → icon ymin 7.8,  ymax 9.2
+#   Horse rows 11–16  → centre 13.5 → icon ymin 12.5, ymax 14.5
+build_domain_panel_uni <- function(cv_label,
+                                   show_x_title  = FALSE,
+                                   show_y_labels = TRUE) {
+  d      <- bar_data_uni      %>% filter(covar_label == cv_label)
+  rp     <- regular_peaks_uni %>% filter(covar_label == cv_label)
+  gp     <- global_peaks_uni  %>% filter(covar_label == cv_label)
+  br     <- bracket_data_uni  %>% filter(covar_label == cv_label)
+  br_pos <- br %>% filter(bracket_sign == "+")
+  br_neg <- br %>% filter(bracket_sign == "-")
+
+  p <- ggplot(d, aes(y = row_label)) +
+    # ── Species separator lines ──
+    geom_hline(yintercept = sep_positions_uni, linetype = "solid",
+               colour = "black", linewidth = 0.4) +
+    # ── Domain-span bars ──
+    geom_segment(aes(x = scale_min_m, xend = scale_max_m,
+                     yend = row_label, colour = domain_sign),
+                 linewidth = 4, lineend = "round") +
+    scale_colour_manual(values = domain_pal, guide = "none") +
+    # ── Regular peak markers (filled diamond, domain-sign fill, black outline) ──
+    geom_point(data = rp, aes(x = peak_scale_m, fill = domain_sign),
+               shape = 23, size = 3.2, colour = "black", stroke = 0.9) +
+    scale_fill_manual(values = domain_pal, guide = "none") +
+    # ── Global peak markers (ggstar star, domain-sign fill) ──
+    geom_star(data = gp, aes(x = peak_scale_m, y = row_label, fill = domain_sign),
+              starshape = 1, colour = "black", starstroke = 0.9, size = 4.0,
+              inherit.aes = FALSE) +
+    # ── Brackets: same-sign split-domain peaks with overlapping CIs (positive) ──
+    {if (nrow(br_pos) > 0)
+      list(
+        geom_segment(data = br_pos, aes(x = x_start, xend = x_end,
+                     y = y_base, yend = y_base),
+                     linewidth = 0.9, colour = "#0072B2",
+                     lineend = "butt", inherit.aes = FALSE),
+        geom_segment(data = br_pos, aes(x = x_start, xend = x_start,
+                     y = y_num + 0.18, yend = y_base),
+                     linewidth = 0.9, colour = "#0072B2",
+                     inherit.aes = FALSE),
+        geom_segment(data = br_pos, aes(x = x_end, xend = x_end,
+                     y = y_num + 0.18, yend = y_base),
+                     linewidth = 0.9, colour = "#0072B2",
+                     inherit.aes = FALSE)
+      )
+    else NULL} +
+    # ── Brackets (negative) ──
+    {if (nrow(br_neg) > 0)
+      list(
+        geom_segment(data = br_neg, aes(x = x_start, xend = x_end,
+                     y = y_base, yend = y_base),
+                     linewidth = 0.9, colour = "#B22222",
+                     lineend = "butt", inherit.aes = FALSE),
+        geom_segment(data = br_neg, aes(x = x_start, xend = x_start,
+                     y = y_num + 0.18, yend = y_base),
+                     linewidth = 0.9, colour = "#B22222",
+                     inherit.aes = FALSE),
+        geom_segment(data = br_neg, aes(x = x_end, xend = x_end,
+                     y = y_num + 0.18, yend = y_base),
+                     linewidth = 0.9, colour = "#B22222",
+                     inherit.aes = FALSE)
+      )
+    else NULL} +
+    # ── Period labels (between icons and bars; anchored x = 30 m, right-justified) ──
+    geom_text(data = period_label_data_uni,
+              aes(x = 30, y = row_label, label = period_text),
+              hjust = 1, size = 3.0, colour = "black",
+              inherit.aes = FALSE) +
+    # ── Animal silhouette icons (reused from §11.4 — already tinted and transparent) ──
+    # Elk now bottom (rows 1–6), Horse now top (rows 11–16); Cattle unchanged.
+    annotation_custom(
+      grob = rasterGrob(elk_img, interpolate = TRUE),
+      xmin = icon_xmin, xmax = icon_xmax, ymin = 2.5, ymax = 4.5
+    ) +
+    annotation_custom(
+      grob = rasterGrob(cow_img, interpolate = TRUE),
+      xmin = icon_xmin, xmax = icon_xmax, ymin = 7.8, ymax = 9.2
+    ) +
+    annotation_custom(
+      grob = rasterGrob(horse_img, interpolate = TRUE),
+      xmin = icon_xmin, xmax = icon_xmax, ymin = 12.5, ymax = 14.5
+    ) +
+    # ── Axes and scales ──
+    scale_x_log10(
+      breaks = scale_breaks,
+      labels = scale_break_labels,
+      limits = x_lims
+    ) +
+    scale_y_discrete(drop = FALSE) +
+    coord_cartesian(clip = "off") +
+    labs(
+      title = cv_label,
+      x     = if (show_x_title) "Spatial extent (buffer radius)" else NULL,
+      y     = NULL
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      axis.text.x        = element_text(angle = 45, hjust = 1, size = 9),
+      axis.text.y        = element_blank(),
+      axis.title         = element_text(size = 13),
+      plot.title         = element_text(size = 13, face = "bold"),
+      panel.grid.minor   = element_blank(),
+      panel.grid.major.y = element_blank(),
+      plot.margin        = if (show_y_labels) margin(5, 8, 5, 70, "pt")
+                           else margin(5, 8, 5, 5, "pt")
+    )
+
+  # ── Species name labels (repositioned to the univariate row midpoints) ──
+  # Elk now at the bottom band centre (3.5), Horse now at the top band centre (13.5).
+  p <- p +
+    annotate("text", x = 4.0, y = 3.5,  label = "Elk",
+             hjust = 0.5, vjust = 0.5, size = 3.8, fontface = "bold") +
+    annotate("text", x = 4.0, y = 8.5,  label = "Cattle",
+             hjust = 0.5, vjust = 0.5, size = 3.8, fontface = "bold") +
+    annotate("text", x = 4.0, y = 13.5, label = "Horse",
+             hjust = 0.5, vjust = 0.5, size = 3.8, fontface = "bold")
+
+  p
+}
+
+# ── Generate 7 covariate panels (univariate) ──
+sorted_labels <- sort(covar_labels)
+
+covar_panels_uni <- lapply(seq_along(sorted_labels), function(i) {
+  build_domain_panel_uni(
+    cv_label      = sorted_labels[i],
+    show_x_title  = i >= 6,            # panels 6 and 7 get x-axis titles
+    show_y_labels = (i %% 2 == 1)      # odd = left column → wider left margin
+  )
+})
+
+# ── Legend panel: reuse legend_plot from §11.4 (not species- or period-specific) ──
+# If §11.4 has not been run in the current session, legend_plot will not exist;
+# in that case knit from the top or run the domain-bars chunk in §11.4 first.
+
+# ── Assemble with patchwork ──
+domain_fig_uni <- wrap_plots(c(covar_panels_uni, list(legend_plot)), ncol = 2) +
+  plot_annotation(
+    title = "Scale of Effect Profiles and Domains of Scale — univariate models (SI)",
+    theme = theme(
+      plot.title = element_text(size = 16, face = "bold")
+    )
+  )
+
+domain_fig_uni
+```
+
+```{r save-univar-domain-figure, cache = FALSE}
+# cache = FALSE so the ggsave() side effect is re-executed on every knit.
+# See note on save-domain-figure chunk for reasoning.
+
+# Write to project-relative figures directory
+ggsave(file.path(fig_dir, "domain_bar_chart_univariate.png"),
+       plot = domain_fig_uni, width = 14, height = 22, dpi = 300)
+
+cat("Univariate domain bar chart saved to:", fig_dir, "\n")
+```
+
+```{r save-univar-domain-outputs}
+# Save classified data and summaries for the univariate domain set,
+# parallel to the multivariate saves above. Filenames carry an
+# _univariate suffix so the multivariate outputs are not overwritten.
+# Disabled for JAE submission — not used by S1–S6 or Dryad.
+# write_csv(domain_data_uni %>%
+#             dplyr::select(species, period, covariate, extent_radius_m,
+#                    estimate, std.error, conf.low, conf.high, p.value,
+#                    domain_sign, domain_id),
+#           file.path(output_dir, "domain_classification_univariate.csv"))
+#
+# write_csv(domain_summary_uni,
+#           file.path(output_dir, "domain_summary_univariate.csv"))
+#
+# write_csv(peer_summary_uni,
+#           file.path(output_dir, "domain_peer_scales_univariate.csv"))
+#
+# cat("Univariate domain outputs saved to:", output_dir, "\n")
+```
+
+## Univariate–multivariate agreement (Horse)
+
+Quantifies how closely the univariate domain structure reproduces the
+multivariate domain structure for horses — the only species with an
+identical temporal grid in both analyses (monthly, May–Oct). Cattle and
+elk cannot be directly compared because their multivariate models pool
+bimonthly and quarterly, respectively, while their univariate models
+fit monthly. Horse yields 6 months × 7 covariates = 42 profile-level
+comparisons and 6 × 7 × 16 = 672 scale-level comparisons.
+
+**Interpretation.** High agreement on horse profiles increases
+confidence that the univariate results for cattle and elk — which are
+not directly comparable at the multivariate temporal resolution —
+carry similar information about scale structure. Low agreement would
+indicate that multivariate conditioning is load-bearing, and the
+univariate sensitivity check cannot be read as a stand-alone inference
+tool for the finer-grained temporal patterns.
+
+**Caveat on NDVI_herb.** The "univariate" NDVI_herb fits are actually
+bivariate (NDVI_herb + p_herb + SAC + strata), because p_herb must be
+retained whenever NDVI_herb is in the model to make imputed zeros
+interpretable (see NDVI imputation rationale in Methods). The comparison
+for NDVI_herb is therefore bivariate-vs-multivariate, not true
+univariate-vs-multivariate. Included here because the intent —
+isolating NDVI_herb from the full base covariate set — is analogous.
+
+**Terminology used in the tables below.** *Detect* = the model
+produced ≥ 1 non-zero domain for that profile (≥ 1 buffer whose 95 %
+CI excluded zero in a consistent direction). *Sign reproduction* = the
+UNI global peak has the same sign as the MV global peak. *Within-
+domain peak agreement* is MV-anchored: for each MV non-zero domain, we
+locate the same-sign UNI domain in the same profile with the closest
+peak on the log-spaced buffer grid, then ask whether their peak scales
+coincide (exactly, or within ±1 buffer class).
+
+```{r profile-global-helper}
+# ── Helper: collapse a domain_summary to one row per profile ──
+# Each (species, period, covariate) profile is reduced to a "global peak":
+# the row with the largest |peak_estimate| across its non-zero domains.
+# Profiles with no non-zero domain are kept with NA scale/estimate and
+# gp_domain_sign = "0" so they can be counted as null matches.
+profile_global <- function(ds) {
+  # Count non-zero domains per profile (attached back at the end)
+  nz_counts <- ds %>%
+    group_by(species, period, covariate) %>%
+    summarise(n_domains_nz = sum(domain_sign != "0"), .groups = "drop")
+
+  # Sort within profile so the first row is the global peak
+  # (max |peak_estimate| among non-zero domains, NA sorted last)
+  ds %>%
+    mutate(
+      is_nz   = domain_sign != "0",
+      abs_est = ifelse(is_nz, abs(peak_estimate), NA_real_)
+    ) %>%
+    arrange(species, period, covariate, desc(abs_est)) %>%
+    group_by(species, period, covariate) %>%
+    slice(1) %>%
+    ungroup() %>%
+    mutate(
+      gp_domain_sign   = domain_sign,
+      gp_peak_scale_m  = ifelse(is_nz, peak_scale_m,  NA_real_),
+      gp_peak_estimate = ifelse(is_nz, peak_estimate, NA_real_),
+      gp_peak_ci_low   = ifelse(is_nz, peak_ci_low,   NA_real_),
+      gp_peak_ci_high  = ifelse(is_nz, peak_ci_high,  NA_real_)
+    ) %>%
+    dplyr::select(species, period, covariate,
+                  gp_domain_sign, gp_peak_scale_m, gp_peak_estimate,
+                  gp_peak_ci_low, gp_peak_ci_high) %>%
+    left_join(nz_counts, by = c("species", "period", "covariate"))
+}
+```
+
+```{r horse-profile-compare}
+# ── Profile-level comparison (Horse only) ──
+# Collapse MV and UNI domain summaries to one row per profile, restrict
+# to Horse, and join on species × period × covariate.
+mv_profiles_horse  <- profile_global(domain_summary)      %>% filter(species == "Horse")
+uni_profiles_horse <- profile_global(domain_summary_uni)  %>% filter(species == "Horse")
+
+horse_compare <- inner_join(
+  mv_profiles_horse,
+  uni_profiles_horse,
+  by = c("species", "period", "covariate"),
+  suffix = c("_mv", "_uni")
+) %>%
+  mutate(
+    # Detect-status partition (null / both / MV-only / UNI-only)
+    both_detect = (gp_domain_sign_mv != "0") & (gp_domain_sign_uni != "0"),
+    only_mv     = (gp_domain_sign_mv != "0") & (gp_domain_sign_uni == "0"),
+    only_uni    = (gp_domain_sign_mv == "0") & (gp_domain_sign_uni != "0"),
+
+    # Sign agreement at the global peak (defined only when both detect)
+    sign_match  = ifelse(both_detect,
+                         gp_domain_sign_mv == gp_domain_sign_uni, NA),
+
+    # Peak-scale distance on the log-spaced buffer grid: "±1 class" is the
+    # meaningful resolution unit given log-spaced sampling; raw metres
+    # would understate agreement at fine scales and overstate it at broad.
+    peak_idx_mv      = match(gp_peak_scale_m_mv,  scale_breaks),
+    peak_idx_uni     = match(gp_peak_scale_m_uni, scale_breaks),
+    peak_within_1    = abs(peak_idx_mv - peak_idx_uni) <= 1,
+
+    # CI overlap at respective peak scales on the log-rate scale
+    # Intervals [a1,b1], [a2,b2] overlap iff a1 <= b2 AND a2 <= b1.
+    ci_overlap_at_peak = ifelse(
+      both_detect,
+      (gp_peak_ci_low_mv  <= gp_peak_ci_high_uni) &
+      (gp_peak_ci_low_uni <= gp_peak_ci_high_mv),
+      NA
+    )
+  )
+```
+
+```{r horse-within-domain-match}
+# ── Within-MV-domain peak-scale matching (Horse only) ──
+# For each of the 45 MV non-zero domains, locate the same-sign UNI
+# domain in the same profile with the closest peak on the log-spaced
+# buffer grid, then test whether their peak scales coincide exactly
+# or within ±1 buffer class. This answers the per-domain (rather than
+# per-profile) scale-of-effect agreement question underlying the
+# Results sentence:
+#
+#   "UV scale of effect within each of the 45 domains that MV models
+#    also detected agreed x% of the time (X% ±1 buffer)."
+#
+# Denominator = 45 MV non-zero domains (all MV non-zero domains count
+# against agreement, including the four MV-only profiles that have no
+# same-sign UNI counterpart and the one Sep p_wetland profile where
+# MV and UNI disagree in sign at the global peak). Reuse of a single
+# UNI domain as the best match for multiple MV domains is permitted —
+# the question is whether UNI could reproduce each MV peak, not a
+# one-to-one assignment.
+
+mv_nz_horse <- domain_summary %>%
+  filter(species == "Horse", domain_sign != "0") %>%
+  # Index within (profile × sign) so rows are preserved when a profile
+  # contains multiple same-sign domains
+  group_by(species, period, covariate, domain_sign) %>%
+  mutate(mv_dom_id = row_number()) %>%
+  ungroup() %>%
+  dplyr::select(species, period, covariate, domain_sign, mv_dom_id,
+                mv_peak_scale_m  = peak_scale_m,
+                mv_peak_estimate = peak_estimate)
+
+uni_nz_horse <- domain_summary_uni %>%
+  filter(species == "Horse", domain_sign != "0") %>%
+  dplyr::select(species, period, covariate, domain_sign,
+                uni_peak_scale_m  = peak_scale_m,
+                uni_peak_estimate = peak_estimate)
+
+mv_domain_match <- mv_nz_horse %>%
+  left_join(uni_nz_horse,
+            by = c("species", "period", "covariate", "domain_sign"),
+            relationship = "many-to-many") %>%
+  mutate(
+    mv_peak_idx  = match(mv_peak_scale_m,  scale_breaks),
+    uni_peak_idx = match(uni_peak_scale_m, scale_breaks),
+    idx_dist     = abs(mv_peak_idx - uni_peak_idx)
+  ) %>%
+  # Best UNI match per MV domain (smallest idx_dist; NA sorts last,
+  # so MV domains with no same-sign UNI counterpart keep their NA row)
+  group_by(species, period, covariate, domain_sign, mv_dom_id,
+           mv_peak_scale_m) %>%
+  arrange(idx_dist, .by_group = TRUE) %>%
+  slice(1) %>%
+  ungroup() %>%
+  mutate(
+    uni_matched   = !is.na(uni_peak_scale_m),
+    peak_exact    = uni_matched & idx_dist == 0,
+    peak_within_1 = uni_matched & idx_dist <= 1
+  )
+
+# Sanity check: number of rows should equal total MV non-zero domains
+stopifnot(nrow(mv_domain_match) == sum(horse_compare$n_domains_nz_mv))
+
+n_mv_domains     <- nrow(mv_domain_match)                        # expect 45
+n_mv_matched_uni <- sum(mv_domain_match$uni_matched)
+n_peak_exact_dom <- sum(mv_domain_match$peak_exact)
+n_peak_w1_dom    <- sum(mv_domain_match$peak_within_1)
+```
+
+```{r horse-scale-level-compare}
+# ── Scale-level sign classification (672 cells = 6 × 7 × 16) ──
+# Key finding: does the cell-level sign contingency include any
+# +/− or −/+ pairs (true directional disagreement)? Anything else
+# reduces to detection-threshold differences, which are captured by
+# the profile-level 'MV only' / 'UNI only' rows in the summary table.
+horse_scale_compare <- inner_join(
+  domain_data %>%
+    filter(species == "Horse") %>%
+    dplyr::select(species, period, covariate, extent_radius_m, domain_sign),
+  domain_data_uni %>%
+    filter(species == "Horse") %>%
+    dplyr::select(species, period, covariate, extent_radius_m, domain_sign),
+  by = c("species", "period", "covariate", "extent_radius_m"),
+  suffix = c("_mv", "_uni")
+)
+
+sign_pair_tab <- horse_scale_compare %>%
+  count(domain_sign_mv, domain_sign_uni) %>%
+  mutate(pct = round(100 * n / sum(n), 1)) %>%
+  arrange(desc(n))
+
+knitr::kable(
+  sign_pair_tab,
+  caption = sprintf(
+    "Horse: cell-level sign classification, %d cells. Any +/− or −/+ row would indicate a true directional disagreement between analyses.",
+    nrow(horse_scale_compare)
+  ),
+  col.names = c("Sign (MV)", "Sign (UNI)", "N cells", "%")
+)
+```
+
+```{r horse-profile-summary-table}
+# ── Consolidated Horse agreement metrics ──
+# Rolls four levels of resolution into one table:
+#   (1) Profile-level detect counts (denominator = 42 profiles)
+#   (2) Global-peak agreement metrics (denominator varies: 30 MV-detect
+#       for sign reproduction; 26 both-detect for sign-match, peak, CI)
+#   (3) MV-anchored within-domain peak agreement (denominator = 45 MV
+#       non-zero domains)
+#   (4) Cell-level sign agreement (denominator = 672 buffer cells)
+# Detect = ≥ 1 non-zero domain for that profile.
+
+n_profiles   <- nrow(horse_compare)
+n_mv_detect  <- sum(horse_compare$gp_domain_sign_mv  != "0")
+n_uni_detect <- sum(horse_compare$gp_domain_sign_uni != "0")
+n_both       <- sum(horse_compare$both_detect)
+n_mv_signrep <- sum(horse_compare$gp_domain_sign_mv != "0" &
+                    horse_compare$gp_domain_sign_mv ==
+                      horse_compare$gp_domain_sign_uni)
+n_mv_domains_tot  <- sum(horse_compare$n_domains_nz_mv)
+n_uni_domains_tot <- sum(horse_compare$n_domains_nz_uni)
+n_cells           <- nrow(horse_scale_compare)
+n_cell_match      <- sum(horse_scale_compare$domain_sign_mv ==
+                         horse_scale_compare$domain_sign_uni)
+n_cell_reverse    <- sum(
+  (horse_scale_compare$domain_sign_mv == "+" &
+   horse_scale_compare$domain_sign_uni == "-") |
+  (horse_scale_compare$domain_sign_mv == "-" &
+   horse_scale_compare$domain_sign_uni == "+")
+)
+n_global_exact    <- sum(horse_compare$peak_idx_mv ==
+                         horse_compare$peak_idx_uni, na.rm = TRUE)
+
+horse_summary_stats <- tibble(
+  metric = c(
+    # Profile-level detect counts
+    "Profiles compared (Horse, 6 months × 7 covariates)",
+    "Profiles with ≥ 1 MV non-zero domain ('MV detects')",
+    "Profiles with ≥ 1 UNI non-zero domain ('UNI detects')",
+    "Profiles with ≥ 1 non-zero domain in both analyses",
+    "Profiles detected only in multivariate (MV only)",
+    "Profiles detected only in univariate (UNI only)",
+    # Global-peak agreement
+    "MV sign reproduced by UNI at global peak | MV detects",
+    "Sign agreement at global peak | both detect",
+    "Global peak exact match on buffer grid | both detect",
+    "Global peak within ±1 buffer class | both detect",
+    "CI overlap at peak scales | both detect",
+    # Domain counts
+    "MV non-zero domains (total across 42 profiles)",
+    "UNI non-zero domains (total across 42 profiles)",
+    # Within-domain peak (MV-anchored)
+    "Within-domain peak: exact match | MV-anchored (of 45 MV domains)",
+    "Within-domain peak: within ±1 buffer class | MV-anchored",
+    # Cell-level
+    "Cell-level sign agreement (same sign incl. 0/0) | 672 cells",
+    "Cell-level sign reversals (+/− or −/+) | 672 cells"
+  ),
+  N = c(
+    n_profiles,
+    n_mv_detect,
+    n_uni_detect,
+    n_both,
+    sum(horse_compare$only_mv),
+    sum(horse_compare$only_uni),
+    n_mv_signrep,
+    sum(horse_compare$sign_match,         na.rm = TRUE),
+    n_global_exact,
+    sum(horse_compare$peak_within_1,      na.rm = TRUE),
+    sum(horse_compare$ci_overlap_at_peak, na.rm = TRUE),
+    n_mv_domains_tot,
+    n_uni_domains_tot,
+    n_peak_exact_dom,
+    n_peak_w1_dom,
+    n_cell_match,
+    n_cell_reverse
+  ),
+  denominator = c(
+    n_profiles, n_profiles, n_profiles, n_profiles, n_profiles, n_profiles,
+    n_mv_detect,
+    n_both, n_both, n_both, n_both,
+    NA_integer_, NA_integer_,
+    n_mv_domains_tot, n_mv_domains_tot,
+    n_cells, n_cells
+  )
+) %>%
+  mutate(percentage = ifelse(!is.na(denominator),
+                             round(100 * N / denominator, 1),
+                             NA_real_))
+
+knitr::kable(
+  horse_summary_stats,
+  caption = sprintf(
+    "Horse: agreement between multivariate and univariate scale-of-effect structure, resolved at the profile, domain, and buffer-cell levels. 'Detect' = ≥ 1 non-zero domain. MV-anchored within-domain peak match: for each of the %d MV non-zero domains, the closest same-sign UNI domain in that profile on the log-spaced buffer grid (see preceding chunk for logic).",
+    n_mv_domains_tot
+  ),
+  col.names = c("Agreement criterion", "N", "Denominator", "%")
+)
+```
+
+### Decomposing the disagreements
+
+A covariate-level decomposition of the cell-level contingency shows
+how the detection-threshold asymmetries are distributed across the
+seven covariates. The per-covariate buckets below collapse the full
+9-cell (MV × UNI) contingency to five mutually exclusive categories
+so the breakdown fits on one page; a "Sign reversal" column would
+appear only if any +/− or −/+ cell existed (none do).
+
+```{r per-covariate-disagreement}
+# ── Per-covariate cell-level sign pairs ──
+# Collapses the 9-cell (MV × UNI) contingency into five mutually
+# exclusive buckets per covariate so that the per-covariate breakdown
+# fits on one page. "Sign reversal" = true +/- or -/+ directional
+# disagreement (expected to be 0 throughout — included as a visible check).
+per_covar_disagreement <- horse_scale_compare %>%
+  mutate(
+    bucket = case_when(
+      domain_sign_mv == domain_sign_uni                ~ "Match (any sign)",
+      domain_sign_mv == "0"  & domain_sign_uni == "+"  ~ "MV=0, UNI=+",
+      domain_sign_mv == "0"  & domain_sign_uni == "-"  ~ "MV=0, UNI=-",
+      domain_sign_mv == "+"  & domain_sign_uni == "0"  ~ "MV=+, UNI=0",
+      domain_sign_mv == "-"  & domain_sign_uni == "0"  ~ "MV=-, UNI=0",
+      TRUE                                              ~ "Sign reversal"
+    )
+  ) %>%
+  count(covariate, bucket) %>%
+  pivot_wider(names_from = bucket, values_from = n, values_fill = 0) %>%
+  dplyr::select(covariate,
+                `Match (any sign)`,
+                `MV=0, UNI=+`, `MV=0, UNI=-`,
+                `MV=+, UNI=0`, `MV=-, UNI=0`,
+                any_of("Sign reversal")) %>%
+  arrange(covariate)
+
+knitr::kable(
+  per_covar_disagreement,
+  caption = "Horse: per-covariate cell-level disagreement structure (cells out of 96 per covariate: 6 months × 16 buffers). Shows whether the UNI→+ excess is concentrated in particular covariates or distributed across them."
+)
+```
+
+
+```{r save-horse-univariate-comparison}
+# ── Save outputs ──
+# CSVs only — no figure. Filenames use an _univariate_comparison suffix
+# so nothing from sections §11.2, §11.4, or §11.5 is overwritten.
+# Disabled for JAE submission — not used by S1–S6 or Dryad.
+# write_csv(horse_compare,
+#           file.path(output_dir, "horse_univariate_comparison_profiles.csv"))
+#
+# write_csv(horse_scale_compare,
+#           file.path(output_dir, "horse_univariate_comparison_scales.csv"))
+#
+# write_csv(horse_summary_stats,
+#           file.path(output_dir, "horse_univariate_comparison_summary.csv"))
+#
+# write_csv(sign_pair_tab,
+#           file.path(output_dir, "horse_univariate_comparison_sign_pairs.csv"))
+#
+# write_csv(per_covar_disagreement,
+#           file.path(output_dir, "horse_univariate_comparison_per_covariate.csv"))
+#
+# write_csv(mv_domain_match,
+#           file.path(output_dir, "horse_univariate_comparison_mv_domain_match.csv"))
+#
+# cat("Horse univariate-multivariate comparison outputs saved to:",
+#     output_dir, "\n")
+```
+
+# Session Info
+
+```{r session-info}
+sessionInfo()
+```

@@ -1,0 +1,334 @@
+---
+title: "Supporting Information S6: Spatial Autocovariate Sensitivity and Semivariograms"
+subtitle: "Multi-scale habitat associations of large grazers in Alberta's foothills"
+author: "anon"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+    self_contained: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE,
+  fig.width = 10, fig.height = 6, dpi = 150,
+  cache = FALSE
+)
+```
+
+```{css, echo=FALSE}
+p.caption {
+  text-align: justify;
+}
+```
+
+## Overview
+
+The spatial autocovariate (SAC) is included in all models as a fixed effect to control for spatial autocorrelation in detection rates. This appendix documents: (1) the empirical semivariograms motivating the bandwidth choice, (2) Moran's I tests confirming the presence of spatial autocorrelation, and (3) a sensitivity analysis comparing scale-of-effect profiles under three SAC conditions (no SAC, 10 km bandwidth, 20 km bandwidth).
+
+## Setup
+
+```{r libraries}
+library(tidyverse)
+library(spdep)
+library(glmmTMB)
+library(broom.mixed)
+library(knitr)
+library(kableExtra)
+
+theme_set(theme_bw(base_size = 12))
+
+month_levels <- c("May", "June", "July", "August", "September", "October")
+focal_species <- c("Horse", "Cattle", "Elk")
+species_colors <- c("Horse" = "#1b9e77", "Cattle" = "#d95f02", "Elk" = "#7570b3")
+covar_colors <- c(
+  "p_harvest" = "#E69F00", "p_herb" = "#90C060", "NDVI_herb" = "#2D6A2E",
+  "p_shrub" = "#9467BD", "p_wetland" = "#5B9BD5", "hu" = "#C44E52", "tri" = "#8B5A2B"
+)
+```
+
+```{r load-data}
+dat_raw <- read_csv("input/analysis_ready_multiscale.csv", show_col_types = FALSE) %>%
+  mutate(
+    month_name = factor(month_name, levels = month_levels),
+    strata = factor(strata, levels = c("Open", "Forest", "Harvest", "Linear", "Riparian")),
+    species = factor(species, levels = focal_species),
+    NDVI_herb = replace_na(NDVI_herb, 0)
+  )
+
+all_scales <- sort(unique(dat_raw$extent_radius_m))
+ref_scale <- all_scales[1]
+dat <- dat_raw %>% filter(!is.na(hu))
+
+# ── Compute SAC at both bandwidths ──
+compute_sac <- function(data, bandwidth_km = 20) {
+  n <- nrow(data)
+  if (n < 2) return(rep(NA_real_, n))
+  coords <- as.matrix(data[, c("longitude", "latitude")])
+  det_rate <- data$n_det / data$camera_days
+  lat_km <- coords[, 2] * 111.32
+  lon_km <- coords[, 1] * 111.32 * cos(mean(coords[, 2]) * pi / 180)
+  coords_km <- cbind(lon_km, lat_km)
+  dist_km <- as.matrix(dist(coords_km))
+  sac_values <- numeric(n)
+  for (i in seq_len(n)) {
+    neighbours <- which(dist_km[i, ] > 0 & dist_km[i, ] <= bandwidth_km)
+    if (length(neighbours) == 0) sac_values[i] <- NA_real_
+    else {
+      weights <- 1 / dist_km[i, neighbours]
+      sac_values[i] <- sum(weights * det_rate[neighbours]) / sum(weights)
+    }
+  }
+  return(sac_values)
+}
+
+sac_df <- dat %>%
+  filter(extent_radius_m == ref_scale) %>%
+  group_by(species, year, month) %>%
+  mutate(
+    sac_20km = compute_sac(pick(everything()), bandwidth_km = 20),
+    sac_10km = compute_sac(pick(everything()), bandwidth_km = 10)
+  ) %>%
+  ungroup() %>%
+  select(location, species, year, month, sac_20km, sac_10km)
+
+dat <- dat %>%
+  left_join(sac_df, by = c("location", "species", "year", "month")) %>%
+  mutate(sac = sac_20km)
+```
+
+## Empirical Semivariograms
+
+Semivariograms were computed from location-level detection rates (pooled across all months and years) for each species. 
+
+```{r semivariogram, fig.height=5, fig.cap="**Figure S6.1.** Empirical semivariograms of pooled detection rates (detections per 100 camera-days) by species. Points show binned mean semivariances (point size proportional to number of pairs); curves are LOESS smooths. Semivariance generally increases with distance, confirming spatial structure in detection rates, though a clean sill is not resolved for any species."}
+spatial_summary <- dat %>%
+  filter(extent_radius_m == ref_scale) %>%
+  group_by(species, location) %>%
+  summarise(
+    total_det = sum(n_det), total_effort = sum(camera_days),
+    overall_rate = (total_det / total_effort) * 100,
+    latitude = first(latitude), longitude = first(longitude),
+    .groups = "drop"
+  )
+
+semivar_data <- spatial_summary %>%
+  group_by(species) %>%
+  group_modify(~ {
+    d <- .x
+    dist_mat <- as.matrix(dist(cbind(
+      d$longitude * 111 * cos(mean(d$latitude) * pi / 180),
+      d$latitude * 111
+    )))
+    rate_diff <- outer(d$overall_rate, d$overall_rate, function(a, b) (a - b)^2 / 2)
+    lt <- lower.tri(dist_mat)
+    tibble(distance_km = dist_mat[lt], semivariance = rate_diff[lt])
+  }) %>%
+  ungroup()
+
+semivar_binned <- semivar_data %>%
+  mutate(dist_bin = cut(distance_km,
+                         breaks = seq(0, max(distance_km), length.out = 20))) %>%
+  filter(!is.na(dist_bin)) %>%
+  group_by(species, dist_bin) %>%
+  summarise(mean_dist = mean(distance_km), mean_semivar = mean(semivariance),
+            n_pairs = n(), .groups = "drop")
+
+ggplot(semivar_binned, aes(x = mean_dist, y = mean_semivar, color = species)) +
+  geom_point(aes(size = n_pairs), alpha = 0.7) +
+  geom_smooth(se = FALSE, method = "loess", span = 0.5) +
+  facet_wrap(~ species, scales = "free_y") +
+  scale_color_manual(values = species_colors) +
+  labs(
+    title = "Empirical semivariograms",
+    subtitle = "Semivariance increases with distance, confirming spatial structure in detection rates",
+    x = "Distance between cameras (km)", y = "Semivariance", size = "N pairs"
+  )
+```
+
+The semivariograms confirm that detection rates are spatially structured — semivariance generally increases with inter-camera distance for all three species. However, the empirical semivariograms do not resolve a clean sill. The 20 km bandwidth was chosen as a conservative upper bound that captures the dominant spatial autocorrelation structure; the sensitivity analysis below demonstrates that the specific bandwidth choice has negligible influence on the scale-of-effect profiles.
+
+## Moran's I Tests
+
+```{r morans-i}
+moran_results <- spatial_summary %>%
+  filter(!is.na(latitude), !is.na(longitude)) %>%
+  group_by(species) %>%
+  group_modify(~ {
+    d <- .x
+    if (nrow(d) < 20) return(tibble(moran_I = NA_real_, p_value = NA_real_))
+    coords_mat <- cbind(d$longitude, d$latitude)
+    k <- min(8, nrow(d) - 1)
+    knn <- knearneigh(coords_mat, k = k)
+    nb <- knn2nb(knn)
+    wts <- nb2listw(nb, style = "W")
+    mt <- moran.test(d$overall_rate, wts, alternative = "greater")
+    tibble(moran_I = round(mt$estimate["Moran I statistic"], 3),
+           expected_I = round(mt$estimate["Expectation"], 4),
+           p_value = round(mt$p.value, 4))
+  }) %>%
+  ungroup()
+
+kable(moran_results,
+      caption = "Moran's I test for spatial autocorrelation in pooled detection rates (k = 8 nearest neighbours).",
+      col.names = c("Species", "Moran's I", "Expected I", "p-value")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+All three species show significant positive spatial autocorrelation, confirming the need for an SAC term in the models.
+
+## SAC Bandwidth Sensitivity Analysis
+
+We compared scale-of-effect profiles for horses under three conditions: (1) no SAC, (2) SAC with 10 km bandwidth, and (3) SAC with 20 km bandwidth. Models were fit at all 16 spatial extents for each of 6 monthly periods using the top 5 AIC-weighted covariates.
+
+```{r model-functions}
+fit_nb_glmm <- function(data, covars, scale_m, sac_var = "sac") {
+  d <- data %>% filter(extent_radius_m == scale_m)
+  if (nrow(d) < 10) return(NULL)
+  vars_to_scale <- c(covars, sac_var)
+  for (v in vars_to_scale) {
+    if (v %in% names(d)) d[[v]] <- as.numeric(scale(d[[v]]))
+  }
+  fixed_terms <- paste(c(covars, sac_var), collapse = " + ")
+  form <- as.formula(paste0("n_det ~ ", fixed_terms, " + offset(log_effort) + (1|strata)"))
+  tryCatch(glmmTMB(form, data = d, family = nbinom2), error = function(e) NULL)
+}
+
+fit_no_sac <- function(data, covars, scale_m) {
+  d <- data %>% filter(extent_radius_m == scale_m)
+  if (nrow(d) < 10) return(NULL)
+  for (v in covars) d[[v]] <- as.numeric(scale(d[[v]]))
+  fixed_terms <- paste(covars, collapse = " + ")
+  form <- as.formula(paste0("n_det ~ ", fixed_terms, " + offset(log_effort) + (1|strata)"))
+  tryCatch(glmmTMB(form, data = d, family = nbinom2), error = function(e) NULL)
+}
+
+tidy_model <- function(mod, species, period, scale_m, model_label, covars_in_model) {
+  if (is.null(mod)) {
+    return(tibble(species = species, period = period, extent_radius_m = scale_m,
+                  model_label = model_label,
+                  term = NA_character_, estimate = NA_real_, std.error = NA_real_,
+                  converged = FALSE))
+  }
+  tryCatch({
+    broom.mixed::tidy(mod, effects = "fixed", conf.int = TRUE) %>%
+      mutate(species = species, period = period, extent_radius_m = scale_m,
+             model_label = model_label, converged = mod$sdr$pdHess)
+  }, error = function(e) {
+    tibble(species = species, period = period, extent_radius_m = scale_m,
+           model_label = model_label,
+           term = NA_character_, estimate = NA_real_, std.error = NA_real_,
+           converged = FALSE)
+  })
+}
+```
+
+```{r sac-sensitivity}
+# Use top 5 horse covariates (from main analysis dredge)
+horse_sac_covars <- c("tri", "hu", "p_harvest", "p_wetland", "p_shrub")
+
+horse_months <- 5:10
+sac_grid <- expand_grid(month = horse_months, scale = all_scales)
+
+# Condition 1: No SAC
+sac_none <- pmap_dfr(sac_grid, function(month, scale) {
+  d <- dat %>% filter(species == "Horse", month == !!month)
+  mod <- fit_no_sac(d, horse_sac_covars, scale)
+  tidy_model(mod, "Horse", month.abb[month], scale, "no_SAC", horse_sac_covars)
+})
+
+# Condition 2: SAC 10km
+sac_10km <- pmap_dfr(sac_grid, function(month, scale) {
+  d <- dat %>% filter(species == "Horse", month == !!month)
+  mod <- fit_nb_glmm(d, horse_sac_covars, scale, sac_var = "sac_10km")
+  tidy_model(mod, "Horse", month.abb[month], scale, "SAC_10km", horse_sac_covars)
+})
+
+# Condition 3: SAC 20km
+sac_20km <- pmap_dfr(sac_grid, function(month, scale) {
+  d <- dat %>% filter(species == "Horse", month == !!month)
+  mod <- fit_nb_glmm(d, horse_sac_covars, scale, sac_var = "sac_20km")
+  tidy_model(mod, "Horse", month.abb[month], scale, "SAC_20km", horse_sac_covars)
+})
+
+sac_bandwidth_results <- bind_rows(sac_none, sac_10km, sac_20km)
+```
+
+```{r sac-bandwidth-plots, fig.height=7, results='asis', fig.cap=c("**Figure S6.2.** Scale-of-effect profiles for terrain ruggedness index (TRI) under three SAC conditions (no SAC, 10 km bandwidth, 20 km bandwidth) for horses, by monthly period. Lines show standardised coefficients across 16 spatial extents.", "**Figure S6.3.** Scale-of-effect profiles for human use intensity (HU) under three SAC conditions for horses, by monthly period.", "**Figure S6.4.** Scale-of-effect profiles for proportion cutblock harvest under three SAC conditions for horses, by monthly period.", "**Figure S6.5.** Scale-of-effect profiles for proportion wetland under three SAC conditions for horses, by monthly period.", "**Figure S6.6.** Scale-of-effect profiles for proportion shrub under three SAC conditions for horses, by monthly period.")}
+scale_labels <- tibble(
+  extent_radius_m = all_scales,
+  scale_index = seq_along(all_scales),
+  label = ifelse(all_scales >= 1000,
+                 paste0(round(all_scales / 1000, 1), "km"),
+                 paste0(all_scales, "m"))
+)
+
+sac_plot_df <- sac_bandwidth_results %>%
+  filter(!term %in% c("(Intercept)", "sac", "sac_10km", "sac_20km"),
+         converged, !is.na(estimate)) %>%
+  rename(covariate = term) %>%
+  left_join(scale_labels, by = "extent_radius_m")
+
+for (cv in horse_sac_covars) {
+  p <- sac_plot_df %>%
+    filter(covariate == cv) %>%
+    ggplot(aes(x = scale_index, y = estimate, color = model_label, linetype = model_label)) +
+    geom_hline(yintercept = 0, color = "grey50") +
+    geom_line(linewidth = 0.8) +
+    facet_wrap(~ period, ncol = 3) +
+    scale_x_continuous(
+      breaks = scale_labels$scale_index[c(1, 4, 8, 12, 16)],
+      labels = scale_labels$label[c(1, 4, 8, 12, 16)]
+    ) +
+    scale_color_manual(values = c("no_SAC" = "#E31A1C", "SAC_10km" = "#1F78B4",
+                                   "SAC_20km" = "#33A02C")) +
+    scale_linetype_manual(values = c("no_SAC" = "dotted", "SAC_10km" = "dashed",
+                                      "SAC_20km" = "solid")) +
+    labs(title = paste0(cv, " — Scale-of-effect profiles by SAC condition"),
+         x = "Buffer radius", y = "Standardized coefficient",
+         color = "SAC condition", linetype = "SAC condition") +
+    theme_minimal(base_size = 11) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+          panel.grid.minor = element_blank())
+  print(p)
+}
+```
+
+### Quantitative Summary
+
+```{r sac-quantitative}
+sac_diff <- sac_plot_df %>%
+  select(covariate, model_label, period, extent_radius_m, estimate) %>%
+  pivot_wider(names_from = model_label, values_from = estimate) %>%
+  mutate(
+    diff_none_vs_20km = no_SAC - SAC_20km,
+    diff_10km_vs_20km = SAC_10km - SAC_20km
+  )
+
+sac_diff_summary <- sac_diff %>%
+  mutate(scale_range = case_when(
+    extent_radius_m <= 319 ~ "Fine (≤319m)",
+    extent_radius_m <= 1806 ~ "Mid (320–1806m)",
+    TRUE ~ "Broad (>1806m)"
+  )) %>%
+  group_by(scale_range) %>%
+  summarise(
+    `|no SAC − 20km SAC|` = round(mean(abs(diff_none_vs_20km), na.rm = TRUE), 3),
+    `|10km SAC − 20km SAC|` = round(mean(abs(diff_10km_vs_20km), na.rm = TRUE), 3),
+    .groups = "drop"
+  )
+
+kable(sac_diff_summary,
+      col.names = c("Scale range", "No SAC vs 20 km SAC", "10 km SAC vs 20 km SAC"),
+      caption = "Mean absolute coefficient difference between SAC conditions by scale range.") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Conclusion
+
+The SAC bandwidth has negligible influence on scale-of-effect profiles. The mean absolute coefficient difference between 10 km and 20 km bandwidth SAC is small across all scale ranges. Differences between no-SAC and SAC models are slightly larger but do not change the identity or rank of scale-of-effect peaks for any covariate. The 20 km bandwidth is retained as the primary specification: the semivariograms confirm that spatial autocorrelation exists in detection rates, and the sensitivity analysis demonstrates that the specific bandwidth choice does not affect ecological conclusions.

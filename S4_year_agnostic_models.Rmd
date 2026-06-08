@@ -1,0 +1,132 @@
+---
+title: "Supporting Information S4: Evidence Supporting Year-Agnostic Models"
+subtitle: "Multi-scale habitat associations of large grazers in Alberta's foothills"
+author: "anon"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    theme: flatly
+    code_folding: hide
+    self_contained: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE,
+  fig.width = 10, fig.height = 6, dpi = 150
+)
+```
+
+```{css, echo=FALSE}
+p.caption {
+  text-align: justify;
+}
+```
+
+## Overview
+
+Models did not include year as a fixed or random effect. This appendix presents the formal evidence supporting that decision: (1) year-to-year variation in detection rates and (2) likelihood ratio tests comparing intercept-only NB models with and without a year term.
+
+## Setup
+
+```{r libraries}
+library(tidyverse)
+library(MASS)
+library(knitr)
+library(kableExtra)
+
+theme_set(theme_bw(base_size = 12))
+
+month_levels <- c("May", "June", "July", "August", "September", "October")
+focal_species <- c("Horse", "Cattle", "Elk")
+species_colors <- c("Horse" = "#1b9e77", "Cattle" = "#d95f02", "Elk" = "#7570b3")
+```
+
+```{r load-data}
+# Load data and build response matrix
+dat_raw <- read_csv("input/analysis_ready_multiscale.csv", show_col_types = FALSE) %>%
+  mutate(
+    month_name = factor(month_name, levels = month_levels),
+    species = factor(species, levels = focal_species)
+  )
+
+ref_scale <- min(dat_raw$extent_radius_m)
+
+# Single-scale response for year-level summaries
+response <- dat_raw %>%
+  filter(extent_radius_m == ref_scale) %>%
+  mutate(
+    det_rate_100 = (n_det / camera_days) * 100,
+    log_effort = log(camera_days)
+  )
+```
+
+## Year-to-Year Variation in Detection Rates
+
+```{r year-variation, fig.height=8, fig.cap="**Figure S4.1.** Mean detection rates per 100 camera-days by species, month, and year. Lines connect monthly means within each year. Panels are scaled independently to highlight within-species temporal patterns."}
+year_summary <- response %>%
+  group_by(species, month_name, year) %>%
+  summarise(mean_rate = mean(det_rate_100), .groups = "drop")
+
+ggplot(year_summary, aes(x = month_name, y = mean_rate,
+                          color = factor(year), group = factor(year))) +
+  geom_point(size = 2.5) +
+  geom_line(linewidth = 0.7) +
+  facet_wrap(~ species, ncol = 1, scales = "free_y") +
+  labs(title = "Mean detection rate by year and month",
+       x = NULL, y = "Mean detections per 100 camera-days", color = "Year") +
+  theme(legend.position = "right")
+```
+
+```{r year-cv}
+year_cv <- year_summary %>%
+  group_by(species, month_name) %>%
+  summarise(
+    n_years = n(),
+    mean_across_years = round(mean(mean_rate), 2),
+    sd_across_years = round(sd(mean_rate), 2),
+    cv = round(if_else(mean_across_years > 0,
+                        sd_across_years / mean_across_years * 100, NA_real_), 1),
+    .groups = "drop"
+  )
+
+kable(year_cv,
+      caption = "Year-to-year variability in mean detection rates. CV% quantifies relative variation.",
+      col.names = c("Species", "Month", "N years", "Mean rate", "SD rate", "CV%")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+While some species-month combinations show moderate to high CV (up to ~100% for elk), this variability is driven by small absolute differences in detection rates at low base rates, rather than large systematic shifts in abundance.
+
+## Likelihood Ratio Tests for Year Effects
+
+For each species-month combination with at least two years of data, we compare a negative binomial intercept-only model against a model with year as a fixed effect using a likelihood ratio test. A significant test (p < 0.05) would indicate that detection rates differ systematically between years beyond what is expected from sampling variability.
+
+```{r year-lrt}
+year_lrt <- response %>%
+  group_by(species, month_name) %>%
+  filter(mean(n_det) > 0, n_distinct(year) >= 2) %>%
+  group_modify(~ {
+    tryCatch({
+      m0 <- glm.nb(n_det ~ 1 + offset(log_effort), data = .x)
+      m1 <- glm.nb(n_det ~ factor(year) + offset(log_effort), data = .x)
+      lr_stat <- as.numeric(2 * (logLik(m1) - logLik(m0)))
+      df_diff <- attr(logLik(m1), "df") - attr(logLik(m0), "df")
+      tibble(lr_statistic = round(lr_stat, 2),
+             df = as.integer(df_diff),
+             p_value = round(pchisq(lr_stat, df = df_diff, lower.tail = FALSE), 4))
+    }, error = function(e) tibble(lr_statistic = NA_real_, df = NA_integer_, p_value = NA_real_))
+  }) %>%
+  ungroup()
+
+kable(year_lrt,
+      caption = "Likelihood ratio test: NB model with year effect vs intercept-only. p < 0.05 would indicate a detectable year effect.",
+      col.names = c("Species", "Month", "LR statistic", "df", "p-value")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Conclusion
+
+No species-month combination showed a significant year effect (all p > 0.09). Models therefore did not include year as a fixed or random effect. Each observation retained its year-specific landscape covariates (NDVI, landcover proportions derived from annual Hermosilla et al. (2018, 2022) composites), so year-to-year variation in landscape condition was captured through the covariates rather than through a separate year term. This avoided spending a parameter on a year effect the data did not support, while preserving the full sample size across years.
