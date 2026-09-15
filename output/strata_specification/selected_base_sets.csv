@@ -1,0 +1,4 @@
+species,fixed,random,unchanged
+Cattle,"hu, p_harvest, p_herb, tri","hu, p_herb, p_wetland, tri",FALSE
+Elk,"hu, p_harvest","hu, p_harvest",TRUE
+Horse,"hu, p_harvest, p_shrub, p_wetland, tri","hu, p_harvest, p_shrub, p_wetland, tri",TRUE

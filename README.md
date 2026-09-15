@@ -1,4 +1,4 @@
-# Code and Supporting Information — **Spatiotemporal dynamics in scale of effect: multi-scale habitat associations of three large grazers across the growing season**
+# Code and Supporting Information: **Spatiotemporal dynamics in scale of effect: multi-scale habitat associations of three large grazers across the growing season**
 
 **Manuscript under double-anonymous peer review.** Author names, affiliations, and acknowledgements have been removed from all files in this repository. They will be restored in the published version.
 
@@ -6,11 +6,12 @@
 
 ## Overview
 
-This repository contains the full analytical workflow supporting the manuscript. It is organized as seven self-contained R Markdown supporting-information documents (S1–S7) plus three Jupyter notebooks that document the upstream PlanetScope NDVI processing pipeline.
+This repository contains the full analytical workflow supporting the manuscript. It is organized as eight self-contained R Markdown supporting-information documents (S1 to S8), three Jupyter notebooks that document the upstream PlanetScope NDVI processing pipeline, and the script that draws the methods schematic.
 
-- **S1–S6** are short, focused supplements that each address one methodological issue (temporal consistency of the NDVI cloud filter, NDVI↔biomass validation, covariate budgets, year-agnosticism of the model structure, the negative-binomial choice, and spatial-autocorrelation sensitivity).
-- **S7** is the main analytical workflow: covariate construction, multivariate negative-binomial GLMMs across 16 buffer radii, scale-of-effect profiling, and all manuscript figures and tables.
-- **Python/** contains the NDVI pre-processing pipeline that produced the bi-weekly mosaics upstream of this analysis. These notebooks are included for transparency only — the outputs (NDVI rasters) are not needed to reproduce the manuscript results, because the buffer-averaged NDVI values are already baked into `analysis_ready_multiscale.csv`.
+- **S1 to S6** are short, focused supplements that each address one methodological issue (temporal consistency of the NDVI cloud filter, NDVI and biomass validation, predictor screening and budgets, year-agnosticism of the model structure, the negative binomial choice, and spatial autocorrelation sensitivity).
+- **S7** is the main analytical workflow: predictor construction, multivariate negative binomial GLMs across 16 buffer radii, scale-of-effect profiling, and the manuscript's result figures and tables.
+- **S8** reports the sensitivity of scale-of-effect inference to specifying the vegetation stratum term as a fixed rather than a random effect. The fixed effect is the specification used throughout the manuscript.
+- **Python/** contains two unrelated things. The three Jupyter notebooks are the NDVI pre-processing pipeline that produced the bi-weekly mosaics upstream of this analysis; they are included for transparency only, because the buffer-averaged NDVI values are already computed in `analysis_ready_multiscale.csv`. `methods_schematic.py` generates the manuscript's methods schematic (Figure 2; see "Regenerating the methods schematic" below).
 
 ---
 
@@ -19,36 +20,68 @@ This repository contains the full analytical workflow supporting the manuscript.
 ```
 repo/
 ├── README.md                              (this file)
-├── LICENSE                                (MIT — applies to the code)
-├── LICENSE.data                           (CC0 — applies to the CSVs in input/)
-├── S1_temporal_consistency_algorithm.Rmd  PlanetScope NDVI cloud filter — algorithm description
-├── S2_ndvi_biomass_validation.Rmd         Exclosure NDVI↔biomass calibration
-├── S3_covariate_budgets.Rmd               Per-buffer covariate budgets (% herb, NDVI, etc.)
+├── LICENSE                                (MIT: applies to the code)
+├── LICENSE.data                           (CC0: applies to the CSVs in input/)
+├── S1_temporal_consistency_algorithm.Rmd  PlanetScope NDVI cloud filter: algorithm description
+├── S2_ndvi_biomass_validation.Rmd         Exclosure NDVI and biomass validation
+├── S3_predictor_budgets.Rmd               Predictor screening, budgets and selection
 ├── S4_year_agnostic_models.Rmd            Check that pooling years is appropriate
-├── S5_overdispersion_nb_choice.Rmd        Justification for negative-binomial error family
-├── S6_sac_sensitivity.Rmd                 Spatial-autocorrelation sensitivity analysis
-├── S7_Main_analysis.Rmd                   Main manuscript analysis & figures
+├── S5_overdispersion_nb_choice.Rmd        Justification for the negative binomial error family
+├── S6_sac_sensitivity.Rmd                 Spatial autocorrelation sensitivity analysis
+├── S7_Main_analysis.Rmd                   Main manuscript analysis and figures
+├── S8_strata_specification.Rmd            Vegetation stratum as a fixed vs. random effect
 │
-├── Python/                                Upstream NDVI pipeline (transparency only)
-│   ├── phase1_8band_processing.ipynb      PlanetScope 8-band scene prep
+├── Python/                                Non-R code
+│   ├── phase1_8band_processing.ipynb      PlanetScope 8-band scene prep (transparency only)
 │   ├── phase2_cloud_filtering.ipynb       Temporal-consistency cloud filter (see S1)
-│   └── monthly_ndvi_mosaics.ipynb         Bi-weekly & monthly mosaicing
+│   ├── monthly_ndvi_mosaics.ipynb         Bi-weekly and monthly mosaicing
+│   └── methods_schematic.py               Generator for the methods schematic (Figure 2)
 │
-├── input/                                 Bundled data (CSVs; also deposited canonically on Dryad)
-│   ├── all_exclosure_data_by_year.csv     and 7 other CSVs — see "Data" section below
+├── input/                                 Bundled data (CSVs; also deposited on Dryad)
+│   ├── all_exclosure_data_by_year.csv     and 7 other CSVs, see "Data" below
 │   ├── analysis_ready_multiscale.csv
 │   ├── …                                  (8 CSVs total)
-│   ├── cow.png                            Species icons used in manuscript figures
+│   ├── cow.png                            Species icons used in the domain bar chart (Figure 3)
 │   ├── elk.png
 │   └── horse.png
 │
-├── figures/                               Manuscript figures not generated by code
-│   └── range_exclosures.jpg
+├── figures/
+│   └── range_exclosures.jpg               Photograph of a grazing exclosure, shown in S2
 │
-└── output/scale_analysis/figures/         Pre-rendered PNGs embedded in S7 (committed so the
-                                           HTML renders correctly on a fresh clone before a
-                                           full knit is run)
+├── output/scale_analysis/                 CSV outputs written by S7 (domain classification,
+│   │                                      top models by extent, stratum contrasts, and the
+│   │                                      horse univariate comparison)
+│   └── figures/                           Pre-rendered PNGs embedded in S7 (committed so the
+│                                          HTML renders correctly on a fresh clone before a
+│                                          full knit is run)
+│
+├── output/strata_specification/           CSV outputs written by S8 (coefficients, profiles,
+│                                          variance components, VIFs and diagnostics under
+│                                          both stratum specifications)
+│
+└── output/methods_schematic/              Written by Python/methods_schematic.py
+    ├── methods_schematic.svg              Vector original
+    └── methods_schematic.png              Raster version, as embedded in the manuscript
 ```
+
+### Regenerating the methods schematic
+
+The methods schematic is drawn programmatically rather than in a graphics editor, so it can be
+regenerated from this repository. From `Python/`:
+
+```
+python methods_schematic.py ../output/methods_schematic/methods_schematic
+```
+
+Python 3.8+ standard library writes the SVG. `cairosvg` and `Pillow` are optional dependencies
+used only to write the PNG.
+
+The example scale-of-effect profile shown in the figure's result panel is **read from
+`output/scale_analysis/domain_classification_full.csv`**, not transcribed, so the figure tracks the
+fitted models. The script also holds an embedded copy of those values as a fallback and stops with
+an error if the CSV disagrees with it, which prevents the figure drifting out of step with the
+analysis after a re-knit. If the profile legitimately changes, update the embedded values in the
+script after confirming the new knit is the one to publish.
 
 ---
 
@@ -56,48 +89,48 @@ repo/
 
 ### 1. Data
 
-The eight CSV files required to knit S1–S7 are bundled in `input/` for convenience, so this repository is self-contained:
+The eight CSV files are bundled in `input/` so this repository is self-contained:
 
 ```
 repo/input/
-├── all_exclosure_data_by_year.csv        (used by S2)
-├── analysis_ready_multiscale.csv         (used by S3, S4, S5, S6, S7)
-├── exclosure_ndvi_2023.csv               (used by S2)
-├── exclosure_ndvi_2024.csv               (used by S2)
-├── exclosure_sites.csv                   (used by S2)
-├── exclosure_sites_ndvi.csv              (duplicate of exclosure_sites.csv; retained for legacy compatibility)
-├── gt_deployment_effort.csv              (used by S3)
-└── independent_detections_fhp_gt.csv     (used by S3)
+├── all_exclosure_data_by_year.csv        (read by S2)
+├── analysis_ready_multiscale.csv         (read by S3, S4, S5, S6, S7, S8)
+├── exclosure_ndvi_2023.csv               (read by S2)
+├── exclosure_ndvi_2024.csv               (read by S2)
+├── exclosure_sites.csv                   (read by S2)
+├── exclosure_sites_ndvi.csv              (identical to exclosure_sites.csv; not read by any document, retained for legacy compatibility)
+├── gt_deployment_effort.csv              (source records; not read by any document)
+└── independent_detections_fhp_gt.csv     (source records; not read by any document)
 ```
+
+`gt_deployment_effort.csv` and `independent_detections_fhp_gt.csv` are the upstream records from which the camera effort, the focal-species detection counts, and the human use predictor in `analysis_ready_multiscale.csv` were derived. The detections file is restricted to the three focal species and to the human and vehicle detections used to build the human use predictor. See the Dryad README for column definitions.
 
 All Rmds use relative paths (`input/filename.csv`), so the files are picked up automatically with no working-directory configuration.
 
-> **Canonical data citation.** The copies bundled here are provided solely for reproducibility convenience. The **authoritative, citable data source is the Dryad deposit** at `DOI: 10.5061/dryad.vhhmgqp8k` *(DOI to be inserted after journal acceptance)*. If you reuse these data for other purposes, please cite the Dryad package — not this repository. The Dryad deposit also contains the full column-level data dictionary in its own README; a condensed version is reproduced in the supporting information (S2, S3, S7).
+> **Canonical data citation.** The copies bundled here are provided for reproducibility convenience. The **authoritative, citable data source is the Dryad deposit** at DOI: 10.5061/dryad.vhhmgqp8k. If you reuse these data for other purposes, please cite the Dryad package, not this repository. The Dryad deposit also contains the full column-level data dictionary in its own README.
 >
-> **Licensing.** The CSVs in `input/` are released under **CC0 1.0 Universal** (see `LICENSE.data`) — the same licence under which they are deposited on Dryad. The MIT licence in `LICENSE` applies only to the R and Python source code in this repository; it does not apply to the data files, the pre-rendered figures, or the icon PNGs.
+> **Licensing.** The CSVs in `input/` are released under **CC0 1.0 Universal** (see `LICENSE.data`), the same licence under which they are deposited on Dryad. The MIT licence in `LICENSE` applies only to the R and Python source code in this repository. Neither licence applies to the figures, the photograph, or the icon PNGs (see "License" below).
 
 ### 2. R environment
 
-The analysis was developed against **R ≥ 4.3** on Windows. The full CRAN package set required to knit all seven Rmds:
+The analysis was run in **R 4.5.2** on Windows. The CRAN packages required to knit all eight Rmds:
 
 ```r
 install.packages(c(
-  "tidyverse",      # dplyr, tidyr, ggplot2, readr, purrr, stringr, lubridate
+  "tidyverse",      # dplyr, tidyr, ggplot2, readr, purrr, stringr, lubridate, tibble
   "MASS",           # glm.nb
-  "glmmTMB",        # NB GLMM with random effects
+  "glmmTMB",        # negative binomial model fitting
   "DHARMa",         # residual diagnostics
   "MuMIn",          # dredge / model.sel
   "broom",
   "broom.mixed",
   "car",            # VIF / Anova
   "spdep",          # Moran's I, neighbour lists
-  "parallel",
   "furrr",          # parallel purrr
   "colorspace",
   "ggnewscale",
   "patchwork",
   "png",
-  "grid",
   "ggstar",
   "kableExtra",
   "flextable",
@@ -107,7 +140,9 @@ install.packages(c(
 ))
 ```
 
-### 3. Knit S7 (and S1–S6 as desired)
+`parallel`, `grid` and `stats` ship with base R.
+
+### 3. Knitting
 
 From the `repo/` directory:
 
@@ -115,21 +150,21 @@ From the `repo/` directory:
 rmarkdown::render("S7_Main_analysis.Rmd")
 ```
 
-S7 is the only document that re-runs the full model set. On a modern workstation it takes **under one hour** end-to-end with caching on (the default). Subsequent knits are much faster because most model fits are cached under `S7_Main_analysis_cache/`.
+Caching is turned off in every document, so each knit refits all models from the data. S7 re-runs the full model set and took roughly ten minutes on the authors' workstation; S8 refits the base models under both stratum specifications. S1 to S6 are lighter.
 
-S1–S6 are lighter-weight and each knit in a few minutes.
+Knit each document in its own R session (RStudio's Knit button does this). S4 loads `MASS`, whose `select()` masks `dplyr::select()` for any document rendered afterwards in the same session.
 
 ### 4. Pre-rendered HTML
 
-If you would rather not re-knit, the rendered HTML for all seven documents is bundled separately with the manuscript submission.
+If you would rather not re-knit, the rendered HTML for all eight documents is provided as Supporting Information with the manuscript.
 
 ---
 
 ## A note on the Python pipeline
 
-The three notebooks in `Python/` document the upstream PlanetScope processing that produced the monthly NDVI rasters used to compute the buffer-averaged `NDVI_herb` values in `analysis_ready_multiscale.csv`. They require raw PlanetScope imagery (not provided — this is ~TB-scale proprietary data licensed from Planet Labs) and a geospatial Python stack including `rasterio`, `numpy`, `pandas`, and `geopandas`.
+The three notebooks in `Python/` document the upstream PlanetScope processing that produced the monthly NDVI rasters used to compute the buffer-averaged `NDVI_herb` values in `analysis_ready_multiscale.csv`. They require raw PlanetScope imagery (not provided: proprietary data licensed from Planet Labs) and a geospatial Python stack including `rasterio`, `numpy`, `pandas`, and `geopandas`.
 
-The notebooks are included here for **methodological transparency**: they let a reader inspect exactly how the cloud filter (described narratively in S1) is implemented in code. They are **not part of the reproducibility workflow** for the manuscript models — the buffer-averaged NDVI columns are already computed and stored in the Dryad CSVs.
+The notebooks are included for **methodological transparency**: they let a reader inspect how the cloud filter described in S1 is implemented in code. They are **not part of the reproducibility workflow** for the manuscript models, because the buffer-averaged NDVI values are already computed and stored in the Dryad CSVs.
 
 Absolute paths to the original network workspace have been replaced with a generic `<PROJECT_ROOT>/` token.
 
@@ -142,7 +177,6 @@ This repository has been scrubbed for author identifiers prior to submission:
 - All R Markdown `author:` fields are set to `"anon"`.
 - Acknowledgements, funder identifiers, and affiliations have been removed.
 - Python notebook paths have been sanitised (institutional network prefixes replaced with `<PROJECT_ROOT>/`).
-- No git history is included.
 
 After acceptance, the anonymised code will be replaced with a fully attributed permanent archive (author names, ORCIDs, acknowledgements, funder IDs, and a DOI).
 
@@ -150,12 +184,9 @@ After acceptance, the anonymised code will be replaced with a fully attributed p
 
 ## License
 
-This repository uses two distinct licences for two distinct categories of files:
-
-- **Code** (the `.Rmd` files, the three Jupyter notebooks in `Python/`, and any scripts) is released under the **MIT License** — see `LICENSE`.
-- **Data** (the eight CSV files in `input/`) is released under **CC0 1.0 Universal (Public Domain Dedication)** — see `LICENSE.data`. This matches the licence under which the same data are deposited on Dryad at DOI: 10.5061/dryad.vhhmgqp8k
-
-The icon PNGs (`input/cow.png`, `input/elk.png`, `input/horse.png`) and the manuscript photograph (`figures/range_exclosures.jpg`) are released under CC0 alongside the data. The pre-rendered figures in `output/scale_analysis/figures/` are derivative products of both the code (MIT) and the data (CC0); for clarity we release them under CC0.
+- **Code** (the `.Rmd` files, the three Jupyter notebooks and the script in `Python/`) is released under the **MIT License**; see `LICENSE`.
+- **Data** (the eight CSV files in `input/`) is released under **CC0 1.0 Universal (Public Domain Dedication)**; see `LICENSE.data`. This matches the licence under which the same data are deposited on Dryad at DOI: 10.5061/dryad.vhhmgqp8k.
+- **Figures, photograph and icons** (`output/scale_analysis/figures/`, `output/methods_schematic/`, `figures/range_exclosures.jpg`, and `input/cow.png`, `input/elk.png`, `input/horse.png`) are provided so that the documents render and the analysis can be reproduced. They are not released under CC0 or MIT. Reuse terms for figures that appear in the article follow the licence of the published article.
 
 ---
 
@@ -163,6 +194,6 @@ The icon PNGs (`input/cow.png`, `input/elk.png`, `input/horse.png`) and the manu
 
 Please cite both the article and the data archive:
 
-- **Article:** `[CITATION_PLACEHOLDER — to be inserted after acceptance]`
-- **Data:** DOI: 10.5061/dryad.vhhmgqp8k
-- **Code:** `[ANON4OPENSCIENCE_URL_PLACEHOLDER]` *(peer-review anonymous mirror)* / `[PERMANENT_ARCHIVE_DOI_PLACEHOLDER]` *(post-acceptance)*
+- **Article:** `[CITATION_PLACEHOLDER: to be inserted after acceptance]`
+- **Data:** DOI: 10.5061/dryad.vhhmgqp8k (active on publication). Reviewer sharing link during peer review: http://datadryad.org/share/LINK_NOT_FOR_PUBLICATION/VSjDtKdBqWdCQeGWt84vPhkWPZz_gFRM6nHsGV0skgU
+- **Code:** anonymous peer-review mirror at https://anonymous.4open.science/r/multi-scale-habitat-associations-manuscript-repo-72C3/ ; `[PERMANENT_ARCHIVE_DOI_PLACEHOLDER]` (post-acceptance)

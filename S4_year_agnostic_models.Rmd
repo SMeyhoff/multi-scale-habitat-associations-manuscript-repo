@@ -1,6 +1,6 @@
 ---
 title: "Supporting Information S4: Evidence Supporting Year-Agnostic Models"
-subtitle: "Multi-scale habitat associations of large grazers in Alberta's foothills"
+subtitle: "Spatiotemporal dynamics in scale of effect: multi-scale habitat associations of three large grazers across the growing season"
 author: "anon"
 date: "`r Sys.Date()`"
 output:
@@ -129,4 +129,6 @@ kable(year_lrt,
 
 ## Conclusion
 
-No species-month combination showed a significant year effect (all p > 0.09). Models therefore did not include year as a fixed or random effect. Each observation retained its year-specific landscape covariates (NDVI, landcover proportions derived from annual Hermosilla et al. (2018, 2022) composites), so year-to-year variation in landscape condition was captured through the covariates rather than through a separate year term. This avoided spending a parameter on a year effect the data did not support, while preserving the full sample size across years.
+No species-month combination showed a significant year effect (all p > 0.09). Models therefore did not include year as a fixed or random effect. Each observation retained its year-specific landscape predictors (NDVI, landcover proportions derived from annual Hermosilla et al. (2018, 2022) composites), so year-to-year variation in landscape condition was captured through the predictors rather than through a separate year term. This avoided spending a parameter on a year effect the data did not support, while preserving the full sample size across years.
+
+Each camera was deployed for a single year and contributes one deployment per model. A deployment beginning and ending in the same calendar month contributes that month as two partial spans in consecutive years, which together total one month of effort rather than two independent samples.

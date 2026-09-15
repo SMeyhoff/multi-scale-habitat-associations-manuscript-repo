@@ -1,6 +1,6 @@
 ---
 title: "Supporting Information S6: Spatial Autocovariate Sensitivity and Semivariograms"
-subtitle: "Multi-scale habitat associations of large grazers in Alberta's foothills"
+subtitle: "Spatiotemporal dynamics in scale of effect: multi-scale habitat associations of three large grazers across the growing season"
 author: "anon"
 date: "`r Sys.Date()`"
 output:
@@ -151,7 +151,7 @@ ggplot(semivar_binned, aes(x = mean_dist, y = mean_semivar, color = species)) +
   )
 ```
 
-The semivariograms confirm that detection rates are spatially structured — semivariance generally increases with inter-camera distance for all three species. However, the empirical semivariograms do not resolve a clean sill. The 20 km bandwidth was chosen as a conservative upper bound that captures the dominant spatial autocorrelation structure; the sensitivity analysis below demonstrates that the specific bandwidth choice has negligible influence on the scale-of-effect profiles.
+The semivariograms confirm that detection rates are spatially structured, semivariance generally increases with inter-camera distance for all three species. However, the empirical semivariograms do not resolve a clean sill. The 20 km bandwidth was chosen as a conservative upper bound that captures the dominant spatial autocorrelation structure; the sensitivity analysis below demonstrates that the specific bandwidth choice has negligible influence on the scale-of-effect profiles.
 
 ## Moran's I Tests
 
@@ -184,7 +184,7 @@ All three species show significant positive spatial autocorrelation, confirming 
 
 ## SAC Bandwidth Sensitivity Analysis
 
-We compared scale-of-effect profiles for horses under three conditions: (1) no SAC, (2) SAC with 10 km bandwidth, and (3) SAC with 20 km bandwidth. Models were fit at all 16 spatial extents for each of 6 monthly periods using the top 5 AIC-weighted covariates.
+We compared scale-of-effect profiles for horses under three conditions: (1) no SAC, (2) SAC with 10 km bandwidth, and (3) SAC with 20 km bandwidth. Models were fit at all 16 spatial extents for each of 6 monthly periods using the top 5 AIC-weighted predictors.
 
 ```{r model-functions}
 fit_nb_glmm <- function(data, covars, scale_m, sac_var = "sac") {
@@ -194,8 +194,11 @@ fit_nb_glmm <- function(data, covars, scale_m, sac_var = "sac") {
   for (v in vars_to_scale) {
     if (v %in% names(d)) d[[v]] <- as.numeric(scale(d[[v]]))
   }
+  # Habitat stratum is a FIXED effect (changed 2026-08-27 in response to
+  # Reviewer 1 item 16; justification in Supporting Information S8). Matches
+  # the specification used in S7.
   fixed_terms <- paste(c(covars, sac_var), collapse = " + ")
-  form <- as.formula(paste0("n_det ~ ", fixed_terms, " + offset(log_effort) + (1|strata)"))
+  form <- as.formula(paste0("n_det ~ ", fixed_terms, " + strata + offset(log_effort)"))
   tryCatch(glmmTMB(form, data = d, family = nbinom2), error = function(e) NULL)
 }
 
@@ -204,7 +207,7 @@ fit_no_sac <- function(data, covars, scale_m) {
   if (nrow(d) < 10) return(NULL)
   for (v in covars) d[[v]] <- as.numeric(scale(d[[v]]))
   fixed_terms <- paste(covars, collapse = " + ")
-  form <- as.formula(paste0("n_det ~ ", fixed_terms, " + offset(log_effort) + (1|strata)"))
+  form <- as.formula(paste0("n_det ~ ", fixed_terms, " + strata + offset(log_effort)"))
   tryCatch(glmmTMB(form, data = d, family = nbinom2), error = function(e) NULL)
 }
 
@@ -229,7 +232,7 @@ tidy_model <- function(mod, species, period, scale_m, model_label, covars_in_mod
 ```
 
 ```{r sac-sensitivity}
-# Use top 5 horse covariates (from main analysis dredge)
+# Use top 5 horse predictors (from main analysis dredge)
 horse_sac_covars <- c("tri", "hu", "p_harvest", "p_wetland", "p_shrub")
 
 horse_months <- 5:10
@@ -269,7 +272,12 @@ scale_labels <- tibble(
 )
 
 sac_plot_df <- sac_bandwidth_results %>%
+  # Drop the intercept, the SAC term under whichever bandwidth was fitted, and
+  # the four stratum level coefficients. Stratum is a fixed effect but it is a
+  # blocking factor from the sampling design, not a landscape predictor, so it
+  # is a nuisance term here in the same way the intercept and the SAC are.
   filter(!term %in% c("(Intercept)", "sac", "sac_10km", "sac_20km"),
+         !str_starts(term, "strata"),
          converged, !is.na(estimate)) %>%
   rename(covariate = term) %>%
   left_join(scale_labels, by = "extent_radius_m")
@@ -289,7 +297,7 @@ for (cv in horse_sac_covars) {
                                    "SAC_20km" = "#33A02C")) +
     scale_linetype_manual(values = c("no_SAC" = "dotted", "SAC_10km" = "dashed",
                                       "SAC_20km" = "solid")) +
-    labs(title = paste0(cv, " — Scale-of-effect profiles by SAC condition"),
+    labs(title = paste0(cv, ": Scale-of-effect profiles by SAC condition"),
          x = "Buffer radius", y = "Standardized coefficient",
          color = "SAC condition", linetype = "SAC condition") +
     theme_minimal(base_size = 11) +
@@ -331,4 +339,6 @@ kable(sac_diff_summary,
 
 ## Conclusion
 
-The SAC bandwidth has negligible influence on scale-of-effect profiles. The mean absolute coefficient difference between 10 km and 20 km bandwidth SAC is small across all scale ranges. Differences between no-SAC and SAC models are slightly larger but do not change the identity or rank of scale-of-effect peaks for any covariate. The 20 km bandwidth is retained as the primary specification: the semivariograms confirm that spatial autocorrelation exists in detection rates, and the sensitivity analysis demonstrates that the specific bandwidth choice does not affect ecological conclusions.
+The SAC bandwidth has negligible influence on scale-of-effect profiles. The mean absolute coefficient difference between 10 km and 20 km bandwidth SAC is small across all scale ranges. Differences between no-SAC and SAC models are slightly larger but do not change the identity or rank of scale-of-effect peaks for any predictor. The 20 km bandwidth is retained as the primary specification: the semivariograms confirm that spatial autocorrelation exists in detection rates, and the sensitivity analysis demonstrates that the specific bandwidth choice does not affect ecological conclusions.
+
+One known cost of the autocovariate approach is that the SAC, being derived from the response, can absorb spatially structured environmental signal in addition to residual spatial autocorrelation (Dormann et al. 2007). The sensitivity analysis bounds that cost: habitat predictor estimates shift by a mean absolute difference of about 0.03 between bandwidths, so environmental signal absorption by the SAC is modest in this system.

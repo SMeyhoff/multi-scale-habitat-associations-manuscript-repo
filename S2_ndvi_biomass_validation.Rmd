@@ -1,6 +1,6 @@
 ---
 title: "Supporting Information S2: NDVI-Biomass Ground-Truth Validation"
-subtitle: "Multi-scale habitat associations of large grazers in Alberta's foothills"
+subtitle: "Spatiotemporal dynamics in scale of effect: multi-scale habitat associations of three large grazers across the growing season"
 author: "anon"
 date: "`r Sys.Date()`"
 output:
@@ -33,11 +33,13 @@ PlanetScope-derived NDVI is used as the primary index of herbaceous forage avail
 
 ## Exclosure Sampling Design
 
-Portable wire grazing exclosures (1.2 m x 1.2 m) were deployed at 20 camera trap locations spanning three land cover types: herbaceous meadows (n = 10), shrublands (n = 4), and wetlands (n = 5). Four exclosures were placed at each location, positioned to capture representative vegetation conditions. Exclosures were deployed in 2023 and 2024 and left in place until 2025. After each clipping event, exclosures were relocated within the same site to avoid repeat sampling of the same quadrat. 
+Portable wire grazing exclosures (1.2 m x 1.2 m) were deployed at 20 camera trap locations spanning three land cover types: herbaceous meadows (n = 11), shrublands (n = 4), and wetlands (n = 5). Four exclosures were placed at each location, positioned to capture representative vegetation conditions. Exclosures were deployed in 2023 and 2024 and left in place until 2025. After each clipping event, exclosures were relocated within the same site to avoid repeat sampling of the same quadrat. 
 
 Aboveground herbaceous biomass (live grass and forb material) was harvested by clipping at ground level within each exclosure. In 2023-2024, a 0.5 m² quadrat was clipped per exclosure; in 2025, the clipping area was reduced to 0.25 m² so that we could sample the exclosure in spring (June) as well as summer (August). All clipped material was sorted to remove litter and woody stems, dried at 50 C for 5 days, and weighed to the nearest 0.1 g. Biomass values were expressed as g/m².
 
 Summer biomass was collected once annually at peak standing crop (late July-August) in 2023, 2024, and 2025. An additional spring collection was conducted in June 2025 to characterise early-season forage conditions.
+
+Because the same locations were sampled in successive years, clipping events within a location are not independent. The relationship estimated here is a validation of the NDVI proxy and is not a component of the habitat models, so no correction propagates into them.
 
 ```{r exclosure-photo, fig.cap = "**Figure S2.1.** A portable wood and wire grazing exclosure (1.2 m × 1.2 m) deployed at a camera trap site on herbaceous land cover, Ghost PLUZ, Alberta. Four exclosures were positioned per camera location to capture representative vegetation conditions.", fig.align = "center", out.width = "70%", echo = FALSE}
 
@@ -139,7 +141,7 @@ Herbaceous meadows support the highest forage biomass in both seasons, consisten
 
 ## NDVI-Biomass Relationship
 
-To test PlanetScope NDVI as a proxy for herbaceous forage availability, each biomass clipping was matched to the NDVI at its collection time and location, extracted within a 50 m buffer around each exclosure site. However, because biomass clippings were collected in 2025 (summer and spring) but 2025 PlanetScope was not available to us, we used the average of the 2023 and 2024 NDVI composites at each site as the best available estimate for spring (June) and summer (August).
+To test PlanetScope NDVI as a proxy for herbaceous forage availability, each biomass clipping was matched to the NDVI at its collection time and location, extracted within a 50 m buffer around each exclosure site. Exclosure locations were recorded to a GPS accuracy of approximately ±10 m. However, because biomass clippings were collected in 2025 (summer and spring) but 2025 PlanetScope was not available to us, we used the average of the 2023 and 2024 NDVI composites at each site as the best available estimate for spring (June) and summer (August).
 
 ```{r ndvi-biomass-join}
 # Match each biomass clipping to NDVI at its collection time and location.

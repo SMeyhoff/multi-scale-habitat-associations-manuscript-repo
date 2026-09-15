@@ -1,0 +1,18 @@
+metric,N,denominator,percentage
+"Profiles compared (Horse, 6 months × 7 predictors)",42,42,100
+Profiles with ≥ 1 MV non-zero domain ('MV detects'),29,42,69
+Profiles with ≥ 1 UNI non-zero domain ('UNI detects'),30,42,71.4
+Profiles with ≥ 1 non-zero domain in both analyses,25,42,59.5
+Profiles detected only in multivariate (MV only),4,42,9.5
+Profiles detected only in univariate (UNI only),5,42,11.9
+MV sign reproduced by UNI at global peak | MV detects,24,29,82.8
+Sign agreement at global peak | both detect,24,25,96
+Global peak exact match on buffer grid | both detect,9,25,36
+Global peak within ±1 buffer class | both detect,13,25,52
+CI overlap at peak scales | both detect,24,25,96
+MV non-zero domains (total across 42 profiles),43,NA,NA
+UNI non-zero domains (total across 42 profiles),46,NA,NA
+Within-domain peak: exact match | MV-anchored (of 43 MV non-zero domains),19,43,44.2
+Within-domain peak: within ±1 buffer class | MV-anchored,23,43,53.5
+Cell-level sign agreement (same sign incl. 0/0) | 672 cells,526,672,78.3
+Cell-level sign reversals (+/− or −/+) | 672 cells,0,672,0

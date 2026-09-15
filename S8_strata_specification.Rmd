@@ -1,0 +1,1064 @@
+---
+title: "Supporting Information S8: Habitat Stratum as a Fixed vs. Random Effect"
+subtitle: "Sensitivity of scale-of-effect inference to the specification of the stratum term"
+author: "anon"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    code_folding: hide
+    theme: flatly
+    number_sections: true
+    self_contained: true
+---
+
+```{r setup, include=FALSE}
+# ── Working-directory anchor ──
+# This Rmd sits alongside S7 and reads the same `input/` bundle, so paths are
+# resolved relative to the directory this file lives in. No further working-
+# directory configuration is required.
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 7,
+  # Caching is OFF by design. This Rmd is archived as a reproducibility
+  # bundle, so it must knit clean from a bare checkout and leave no
+  # _cache/ directory behind. knitr caches do not track changes in
+  # function definitions or upstream chunks unless autodep is set, so a
+  # cached run can silently reuse results fitted under a superseded model
+  # specification. A full cold knit removes that failure mode entirely.
+  cache = FALSE
+)
+
+library(tidyverse)
+library(glmmTMB)     # NB GLMM
+library(broom.mixed) # tidy() for glmmTMB
+library(DHARMa)      # residual diagnostics
+library(parallel)
+library(furrr)       # parallel purrr
+library(knitr)
+library(kableExtra)
+
+# NOTE: MASS is deliberately NOT loaded here (unlike S7) so that dplyr::select
+# is not masked. Nothing in this document needs glm.nb.
+
+n_cores <- parallel::detectCores() - 1
+plan(multisession, workers = n_cores)
+
+base_path  <- "."
+data_file  <- file.path(base_path, "input",  "analysis_ready_multiscale.csv")
+output_dir <- file.path(base_path, "output", "strata_specification")
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+```
+
+# Overview
+
+Habitat stratum is fitted as a **fixed effect** throughout the main analysis.
+This appendix documents the evidence behind that specification. It was
+originally prepared as a comparison between a random intercept and a fixed
+effect; the comparison came down decisively on the side of the fixed effect, and
+the main analysis was refitted accordingly. What follows is the record of that
+comparison.
+
+Two properties of the design make the fixed effect the appropriate estimator on
+first principles. With only five strata (open, forest, harvest, linear,
+riparian), a variance component is estimated from four degrees of freedom, which
+is not enough to determine it reliably. More importantly, the five strata are
+exhaustive categories fixed by the sampling design rather than a sample drawn
+from a wider population of strata, which is the condition for a fixed
+effect.
+
+The empirical case is set out below. Each section is stated as a question,
+because that is how the comparison was run. The answers are what justify the
+specification. In summary: the stratum variance is estimated at or near zero in
+most elk models, so the random intercept was not absorbing stratum differences
+at all; AIC prefers the fixed effect in 9 of the 10 species-period combinations;
+the collinearity cost that would have argued for partial pooling does not
+materialise, with no variance inflation factor exceeding 4.03 and no model
+failing to converge; and the inference the paper reports is largely preserved,
+with the changes concentrated at fine spatial extents where stratum and the
+habitat predictors are confounded.
+
+Two scoping decisions:
+
+1. **Predictor sets are held fixed.** The base predictor sets used for the
+   profile comparison were selected by the dredge procedure in S7 under the
+   random-intercept specification. Comparing profiles under two specifications
+   *and* two predictor sets would change two things at once and would make any
+   difference impossible to attribute. The sets used in the comparison are
+   therefore taken verbatim from the original S7 run and applied to both
+   specifications. The final section then re-runs selection itself under both
+   specifications, and reports where the selected sets differ.
+2. **Only base models are refit.** Substitution and univariate models inherit
+   the same stratum term, so the base models are a sufficient test of whether the
+   specification matters.
+
+All functions in Section 3 are duplicated from S7, with the single exception of
+the stratum term in `fit_nb_glmm()`, which is switchable here and documented
+inline. 
+
+# Data Preparation
+
+The preparation below reproduces S7 exactly: drop locations where the human-use
+predictor is NA, impute structural NDVI NAs to zero, compute the spatial
+autocovariate, and build the pooled cattle and elk datasets.
+
+```{r load-and-prepare}
+dat_raw <- read_csv(data_file, show_col_types = FALSE)
+
+# Spatial scales (16 radii)
+all_scales <- sort(unique(dat_raw$extent_radius_m))
+
+habitat_covars <- c("p_herb", "NDVI_herb", "p_shrub", "p_harvest",
+                    "p_wetland", "hu", "tri")
+
+# Temporal structures (identical to S7)
+horse_months <- 5:10
+cattle_bimonthly <- list("Jul-Aug" = c(7, 8), "Sep-Oct" = c(9, 10))
+elk_quarterly    <- list("May-Jul" = c(5, 6, 7), "Aug-Oct" = c(8, 9, 10))
+
+# Drop rows with NA hu (edge locations outside the IDW interpolation extent),
+# then impute NDVI_herb NA to 0 (occurs where p_herb = 0).
+dat <- dat_raw %>%
+  filter(!is.na(hu)) %>%
+  mutate(
+    NDVI_herb = replace_na(NDVI_herb, 0),
+    # Explicit factor so that both the (1|strata) and the fixed-effect
+    # specifications see the same level ordering. Open is the reference level:
+    # it is one of the information-rich strata, whereas Forest has as few as 4
+    # non-zero detection rows in some species-periods and would inflate every
+    # contrast estimated against it. Matches the declaration used in S6 and S7.
+    strata    = factor(strata, levels = c("Open", "Forest", "Harvest", "Linear", "Riparian"))
+  )
+
+cat("Rows after preparation:", nrow(dat), "\n")
+cat("Strata levels (reference first):", paste(levels(dat$strata), collapse = ", "), "\n")
+```
+
+```{r compute-sac}
+# ── Duplicated verbatim from S7 ──
+compute_sac <- function(data, bandwidth_km = 20) {
+  n <- nrow(data)
+  if (n < 2) return(rep(NA_real_, n))
+
+  coords   <- as.matrix(data[, c("longitude", "latitude")])
+  det_rate <- data$n_det / data$camera_days
+
+  # Approximate km conversion for the Alberta foothills (~51 N)
+  lat_km    <- coords[, 2] * 111.32
+  lon_km    <- coords[, 1] * 111.32 * cos(mean(coords[, 2]) * pi / 180)
+  coords_km <- cbind(lon_km, lat_km)
+  dist_km   <- as.matrix(dist(coords_km))
+
+  sac_values <- numeric(n)
+  for (i in seq_len(n)) {
+    neighbours <- which(dist_km[i, ] > 0 & dist_km[i, ] <= bandwidth_km)
+    if (length(neighbours) == 0) {
+      sac_values[i] <- NA_real_
+    } else {
+      weights <- 1 / dist_km[i, neighbours]
+      sac_values[i] <- sum(weights * det_rate[neighbours]) / sum(weights)
+    }
+  }
+  sac_values
+}
+
+ref_scale <- all_scales[1]
+
+sac_df <- dat %>%
+  filter(extent_radius_m == ref_scale) %>%
+  group_by(species, year, month) %>%
+  mutate(sac = compute_sac(pick(everything()), bandwidth_km = 20)) %>%
+  ungroup() %>%
+  dplyr::select(location, species, year, month, sac)
+
+dat <- dat %>%
+  left_join(sac_df, by = c("location", "species", "year", "month"))
+
+cat("SAC NAs:", sum(is.na(dat$sac)), "\n")
+```
+
+```{r pooled-datasets}
+# ── Duplicated verbatim from S7 ──
+pool_months <- function(data, month_vec, period_label) {
+  data %>%
+    filter(month %in% month_vec) %>%
+    group_by(location, species, year, extent_radius_m, strata, strata_code,
+             latitude, longitude) %>%
+    summarise(
+      n_det       = sum(n_det),
+      camera_days = sum(camera_days),
+      p_herb    = first(p_herb),
+      p_shrub   = first(p_shrub),
+      p_wetland = first(p_wetland),
+      p_harvest = first(p_harvest),
+      tri       = first(tri),
+      NDVI_herb = mean(NDVI_herb, na.rm = TRUE),
+      hu        = mean(hu,        na.rm = TRUE),
+      sac       = mean(sac,       na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      log_effort = log(camera_days),
+      period     = period_label
+    ) %>%
+    filter(camera_days >= 7)
+}
+
+cattle_bimonthly_data <- map2_dfr(
+  cattle_bimonthly, names(cattle_bimonthly),
+  ~ pool_months(filter(dat, species == "Cattle"), .x, .y)
+)
+
+elk_quarterly_data <- map2_dfr(
+  elk_quarterly, names(elk_quarterly),
+  ~ pool_months(filter(dat, species == "Elk"), .x, .y)
+)
+
+horse_data <- dat %>% filter(species == "Horse")
+```
+
+# Model Fitting Functions
+
+```{r model-functions}
+# ── Duplicated from S7, with ONE modification ──
+# `strata_effect` selects the stratum term. The default, "random", reproduces
+# S7's behaviour exactly; "fixed" replaces (1|strata) with strata as a set of
+# fixed effects. Nothing else in this function differs from S7.
+fit_nb_glmm <- function(data, covars, scale_m, standardize = TRUE,
+                        strata_effect = c("random", "fixed")) {
+
+  strata_effect <- match.arg(strata_effect)
+
+  d <- data %>% filter(extent_radius_m == scale_m)
+  if (nrow(d) < 10) return(NULL)
+
+  # Standardize predictors (including the SAC), as in S7
+  vars_to_scale <- c(covars, "sac")
+  for (v in vars_to_scale) {
+    if (v %in% names(d)) d[[v]] <- as.numeric(scale(d[[v]]))
+  }
+
+  fixed_terms <- paste(c(covars, "sac"), collapse = " + ")
+
+  # ── THE ONLY DIFFERENCE BETWEEN THE TWO SPECIFICATIONS ──
+  strata_term <- if (strata_effect == "random") "(1|strata)" else "strata"
+
+  form <- as.formula(
+    paste0("n_det ~ ", fixed_terms, " + ", strata_term, " + offset(log_effort)")
+  )
+
+  tryCatch({
+    mod <- glmmTMB(form, data = d, family = nbinom2)
+    if (!mod$sdr$pdHess) {
+      warning("Non-positive-definite Hessian at scale ", scale_m)
+    }
+    mod
+  }, error = function(e) {
+    warning("Model failed at scale ", scale_m, ": ", e$message)
+    NULL
+  })
+}
+
+
+# ── Duplicated from S7, with conf.low / conf.high added to the failure stub ──
+# so that failed fits bind cleanly with successful ones.
+tidy_model <- function(mod, species, period, scale_m, model_type, covars_in_model) {
+
+  null_row <- tibble(
+    species = species, period = period, extent_radius_m = scale_m,
+    model_type = model_type,
+    covars_in_model = paste(covars_in_model, collapse = "+"),
+    term = NA_character_, estimate = NA_real_, std.error = NA_real_,
+    statistic = NA_real_, p.value = NA_real_,
+    conf.low = NA_real_, conf.high = NA_real_,
+    converged = FALSE, AIC = NA_real_
+  )
+
+  if (is.null(mod)) return(null_row)
+
+  tryCatch({
+    broom.mixed::tidy(mod, effects = "fixed", conf.int = TRUE) %>%
+      mutate(
+        species         = species,
+        period          = period,
+        extent_radius_m = scale_m,
+        model_type      = model_type,
+        covars_in_model = paste(covars_in_model, collapse = "+"),
+        converged       = mod$sdr$pdHess,
+        AIC             = AIC(mod)
+      )
+  }, error = function(e) null_row)
+}
+
+
+# Extract the stratum random-effect SD from a fitted glmmTMB model.
+# Returns NA for the fixed-effect specification, where no such term exists.
+extract_strata_sd <- function(mod) {
+  if (is.null(mod)) return(NA_real_)
+  tryCatch(sqrt(VarCorr(mod)$cond$strata[1, 1]), error = function(e) NA_real_)
+}
+```
+
+# Model Configuration
+
+```{r configuration}
+# Base predictor sets, taken verbatim from the S7 dredge output.
+# Confirm against Table 1 of the manuscript before interpreting results.
+base_covars <- list(
+  Horse  = c("tri", "hu", "p_harvest", "p_wetland", "p_shrub"),
+  Cattle = c("hu", "tri", "p_herb", "p_wetland"),
+  Elk    = c("hu", "p_harvest")
+)
+
+# Return the analysis dataset for one species x period combination
+get_period_data <- function(sp, per) {
+  if (sp == "Horse") {
+    horse_data %>% filter(month == match(per, month.abb))
+  } else if (sp == "Cattle") {
+    cattle_bimonthly_data %>% filter(period == per)
+  } else {
+    elk_quarterly_data %>% filter(period == per)
+  }
+}
+
+# The 10 species x period combinations used in the main analysis
+jobs <- bind_rows(
+  tibble(species = "Horse",  period = month.abb[horse_months]),
+  tibble(species = "Cattle", period = names(cattle_bimonthly)),
+  tibble(species = "Elk",    period = names(elk_quarterly))
+)
+
+# Full fitting grid: 10 combinations x 16 extents x 2 specifications
+fit_grid <- expand_grid(
+  jobs,
+  extent_radius_m = all_scales,
+  spec            = c("random", "fixed")
+)
+
+cat("Model fits to run:", nrow(fit_grid), "\n")
+```
+
+# Fit Both Specifications
+
+```{r fit-both}
+results_raw <- future_pmap_dfr(
+  fit_grid,
+  function(species, period, extent_radius_m, spec) {
+    d      <- get_period_data(species, period)
+    covars <- base_covars[[species]]
+
+    mod <- fit_nb_glmm(d, covars, extent_radius_m, strata_effect = spec)
+
+    # Evaluate BOTH of these before the mutate(). Inside mutate(), once `spec`
+    # has been assigned as a column, any later reference to `spec` resolves to
+    # that column (length n) rather than to this function argument (length 1),
+    # which makes if() fail with "the condition has length > 1".
+    spec_val <- spec
+    sd_val   <- if (identical(spec, "random")) extract_strata_sd(mod) else NA_real_
+
+    tidy_model(mod, species, period, extent_radius_m, "base", covars) %>%
+      mutate(spec = spec_val, strata_sd = sd_val)
+  },
+  .options  = furrr_options(seed = TRUE),
+  .progress = TRUE
+)
+
+# Keep only the habitat predictors. This drops the intercept, the SAC, the
+# dispersion component, and (under the fixed specification) the four stratum
+# level coefficients, which are nuisance terms here.
+results <- results_raw %>%
+  filter(term %in% unlist(base_covars)) %>%
+  mutate(
+    spec    = factor(spec, levels = c("random", "fixed"),
+                     labels = c("Random intercept", "Fixed effect")),
+    species = factor(species, levels = c("Horse", "Cattle", "Elk"))
+  )
+
+cat("Converged fits:",
+    results_raw %>% distinct(species, period, extent_radius_m, spec, converged) %>%
+      pull(converged) %>% sum(na.rm = TRUE),
+    "of", nrow(fit_grid), "\n")
+```
+
+# Is the Random Effect Well Estimated?
+
+The first question is whether the random intercept was estimating anything. If
+the stratum variance is estimated near zero, partial pooling has gone to
+completion, all five stratum baselines have been shrunk onto a single number,
+and the fitted model is equivalent to one carrying no stratum term at all. That
+is a failure of estimation rather than a finding, and glmmTMB issues no warning
+when it happens.
+
+```{r variance-components}
+varcomp <- results_raw %>%
+  filter(spec == "random") %>%
+  distinct(species, period, extent_radius_m, strata_sd) %>%
+  group_by(species, period) %>%
+  summarise(
+    n_models   = n(),
+    sd_min     = min(strata_sd,    na.rm = TRUE),
+    sd_median  = median(strata_sd, na.rm = TRUE),
+    sd_max     = max(strata_sd,    na.rm = TRUE),
+    # A near-zero SD indicates a boundary (effectively singular) fit
+    n_near_zero = sum(strata_sd < 1e-4, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+kable(varcomp, digits = 3,
+      caption = "**Table S8.1.** Stratum random-effect standard deviation (log scale) across the 16 spatial extents, by species and period. Near-zero values indicate boundary fits where the random effect is effectively absent.") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+# Do the Reported Results Change?
+
+The paper reports two things per profile: the **peak scale of effect** and the
+**domain structure** (the number and sign of contiguous runs where the 95% CI
+excludes zero). The function below extracts both, using the same definitions as
+the main text.
+
+```{r profile-summaries}
+# Summarise one species x period x predictor x specification profile
+# across the 16 spatial extents.
+profile_summary <- function(d) {
+  d <- arrange(d, extent_radius_m)
+
+  # A cell is "non-zero" when the 95% CI excludes zero
+  sig <- !is.na(d$conf.low) & !is.na(d$conf.high) &
+         (d$conf.low > 0 | d$conf.high < 0)
+  sgn <- ifelse(sig, sign(d$estimate), 0)
+
+  # Contiguous runs of identical non-zero sign = domains of scale
+  r      <- rle(sgn)
+  n_dom  <- sum(r$values != 0)
+  signs  <- paste(ifelse(r$values[r$values != 0] > 0, "+", "-"), collapse = "")
+
+  if (any(sig)) {
+    i         <- which(sig)[which.max(abs(d$estimate[sig]))]
+    peak      <- d$extent_radius_m[i]
+    peak_est  <- d$estimate[i]
+  } else {
+    peak <- NA_real_; peak_est <- NA_real_
+  }
+
+  tibble(
+    n_sig_extents = sum(sig),
+    n_domains     = n_dom,
+    domain_signs  = if (signs == "") NA_character_ else signs,
+    peak_extent_m = peak,
+    peak_estimate = peak_est
+  )
+}
+
+profiles <- results %>%
+  group_by(species, period, term, spec) %>%
+  group_modify(~ profile_summary(.x)) %>%
+  ungroup()
+```
+
+```{r profile-comparison}
+comparison <- profiles %>%
+  pivot_wider(
+    names_from  = spec,
+    values_from = c(n_sig_extents, n_domains, domain_signs,
+                    peak_extent_m, peak_estimate),
+    names_sep   = "_"
+  ) %>%
+  mutate(
+    peak_match   = `peak_extent_m_Random intercept` == `peak_extent_m_Fixed effect`,
+    # Treat two profiles with no non-zero domain anywhere as matching
+    peak_match   = if_else(is.na(`peak_extent_m_Random intercept`) &
+                           is.na(`peak_extent_m_Fixed effect`), TRUE, peak_match),
+    domain_match = `domain_signs_Random intercept` == `domain_signs_Fixed effect`,
+    domain_match = if_else(is.na(`domain_signs_Random intercept`) &
+                           is.na(`domain_signs_Fixed effect`), TRUE, domain_match)
+  )
+
+cat("Profiles compared:", nrow(comparison), "\n")
+cat("Peak scale identical:  ", sum(comparison$peak_match,   na.rm = TRUE),
+    "of", nrow(comparison), "\n")
+cat("Domain structure identical:", sum(comparison$domain_match, na.rm = TRUE),
+    "of", nrow(comparison), "\n")
+
+kable(
+  comparison %>%
+    dplyr::select(species, period, term,
+                  `peak_extent_m_Random intercept`, `peak_extent_m_Fixed effect`,
+                  peak_match,
+                  `domain_signs_Random intercept`, `domain_signs_Fixed effect`,
+                  domain_match) %>%
+    arrange(species, period, term),
+  col.names = c("Species", "Period", "Predictor",
+                "Peak (random)", "Peak (fixed)", "Peak match",
+                "Domains (random)", "Domains (fixed)", "Domain match"),
+  caption = "**Table S8.2.** Peak scale of effect (m) and domain structure under each specification. Domain signs read fine to broad scale; NA indicates no non-zero domain at any extent."
+) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Cell-level agreement
+
+A stricter test than the profile summaries: across every species x period x
+predictor x extent cell, does the sign classification (positive non-zero,
+negative non-zero, or CI crossing zero) agree between specifications?
+
+```{r cell-agreement}
+cells <- results %>%
+  mutate(
+    class = case_when(
+      is.na(conf.low) | is.na(conf.high) ~ NA_character_,
+      conf.low  > 0                      ~ "positive",
+      conf.high < 0                      ~ "negative",
+      TRUE                               ~ "zero"
+    )
+  ) %>%
+  dplyr::select(species, period, term, extent_radius_m, spec, class, estimate) %>%
+  pivot_wider(names_from = spec, values_from = c(class, estimate), names_sep = "_")
+
+agreement <- cells %>%
+  summarise(
+    n_cells   = n(),
+    n_agree   = sum(`class_Random intercept` == `class_Fixed effect`, na.rm = TRUE),
+    pct_agree = 100 * n_agree / n_cells,
+    # Correlation of the point estimates themselves
+    r_estimates = cor(`estimate_Random intercept`, `estimate_Fixed effect`,
+                      use = "complete.obs")
+  )
+
+kable(agreement, digits = c(0, 0, 1, 3),
+      col.names = c("Cells", "Agreeing", "% agreement", "r (estimates)"),
+      caption = "**Table S8.3.** Cell-level agreement in sign classification and correlation of point estimates between the two specifications.") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+
+# Where do the disagreements sit?
+disagreements <- cells %>%
+  filter(`class_Random intercept` != `class_Fixed effect`) %>%
+  arrange(species, period, term, extent_radius_m)
+
+if (nrow(disagreements) > 0) {
+  kable(disagreements, digits = 3,
+        caption = "**Table S8.4.** Cells where the sign classification differs between specifications.") %>%
+    kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+} else {
+  cat("No cell-level disagreements.\n")
+}
+```
+
+## Coefficient profiles under both specifications
+
+```{r profile-figure, fig.height=12}
+ggplot(results, aes(x = extent_radius_m, y = estimate,
+                    colour = spec, fill = spec)) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high),
+              alpha = 0.15, colour = NA) +
+  geom_line(linewidth = 0.7) +
+  scale_x_log10() +
+  facet_grid(term ~ species + period, scales = "free_y") +
+  scale_colour_manual(values = c("Random intercept" = "#2C7FB8",
+                                 "Fixed effect"     = "#D95F02")) +
+  scale_fill_manual(values   = c("Random intercept" = "#2C7FB8",
+                                 "Fixed effect"     = "#D95F02")) +
+  labs(
+    title    = "Scale-of-effect profiles: stratum as random intercept vs. fixed effect",
+    subtitle = "Standardized coefficients (log-rate scale) with 95% confidence intervals",
+    x        = "Buffer radius (m, log scale)",
+    y        = "Standardized coefficient",
+    colour   = "Stratum term", fill = "Stratum term"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(legend.position = "top",
+        strip.text = element_text(size = 8))
+```
+
+# Collinearity Between Stratum and the Habitat Predictors
+
+The strongest argument that could be made for retaining the random intercept is
+that the five strata overlap with the habitat predictors, so entering them as
+fixed effects makes the stratum term and the predictors compete for the same
+variance. The two diagnostics below are what test it.
+
+The same overlap cuts the other way, and this is the substantive reason the
+specification matters rather than a technicality. Where a predictor is strongly
+confounded with stratum, any stratum difference the random intercept fails to
+absorb does not vanish: it is attributed to whichever predictor most resembles
+habitat type. The confounding is concentrated at fine spatial extents, which is
+where the two specifications differ most and where the broad-scale results are
+unaffected.
+
+Two diagnostics below. First, how much of each predictor's variance the strata
+alone explain, which identifies *which* predictors are confounded with stratum.
+Second, variance inflation factors for the habitat predictors with and without
+strata as fixed effects. Note that the "without strata" design matrix is exactly
+the fixed-effect structure of the random-intercept model, so the difference
+between the two columns is the collinearity cost of the fixed specification.
+
+VIF is invariant to linear rescaling, so no standardization is needed here.
+
+```{r vif-functions}
+# Variance inflation factors computed directly from the fixed-effects design
+# matrix. VIF_j = SST_j / SSE_j from regressing column j on all other columns,
+# which avoids a dependency on car or performance.
+compute_vif <- function(data, covars, scale_m, include_strata = TRUE) {
+
+  d <- data %>% filter(extent_radius_m == scale_m)
+  if (nrow(d) < 10) return(NULL)
+
+  rhs <- paste(c(covars, "sac", if (include_strata) "strata"), collapse = " + ")
+  X   <- model.matrix(as.formula(paste("~", rhs)), data = d)
+  X   <- X[, colnames(X) != "(Intercept)", drop = FALSE]
+
+  # Drop any zero-variance column (e.g. a stratum absent from this subset)
+  X <- X[, apply(X, 2, function(z) var(z) > 0), drop = FALSE]
+  if (ncol(X) < 2) return(NULL)
+
+  vifs <- vapply(seq_len(ncol(X)), function(j) {
+    y   <- X[, j]
+    Z   <- cbind(1, X[, -j, drop = FALSE])
+    fit <- tryCatch(lm.fit(Z, y), error = function(e) NULL)
+    if (is.null(fit)) return(NA_real_)
+    sse <- sum(fit$residuals^2)
+    sst <- sum((y - mean(y))^2)
+    if (sst <= 0) return(NA_real_)
+    if (sse <= 0) return(Inf)          # perfect collinearity
+    sst / sse
+  }, numeric(1))
+
+  tibble(term = colnames(X), vif = vifs)
+}
+
+
+# Proportion of each predictor's variance explained by stratum alone.
+# High values identify predictors confounded with the sampling stratification.
+covariate_strata_r2 <- function(data, covars, scale_m) {
+  d <- data %>% filter(extent_radius_m == scale_m)
+  if (nrow(d) < 10) return(NULL)
+
+  map_dfr(c(covars, "sac"), function(v) {
+    tibble(
+      term         = v,
+      r2_on_strata = summary(lm(d[[v]] ~ d$strata))$r.squared
+    )
+  })
+}
+```
+
+## How confounded is each predictor with stratum?
+
+```{r covariate-strata-confounding}
+confounding <- pmap_dfr(
+  expand_grid(jobs, extent_radius_m = all_scales),
+  function(species, period, extent_radius_m) {
+    d   <- get_period_data(species, period)
+    res <- covariate_strata_r2(d, base_covars[[species]], extent_radius_m)
+    if (is.null(res)) return(NULL)
+    res %>% mutate(species = species, period = period,
+                   extent_radius_m = extent_radius_m)
+  }
+)
+
+confounding_summary <- confounding %>%
+  filter(term != "sac") %>%
+  group_by(species, term) %>%
+  summarise(
+    r2_min    = min(r2_on_strata),
+    r2_median = median(r2_on_strata),
+    r2_max    = max(r2_on_strata),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(r2_median))
+
+kable(confounding_summary, digits = 3,
+      col.names = c("Species", "Predictor", "min R2", "median R2", "max R2"),
+      caption = "**Table S8.7.** Proportion of each habitat predictor's variance explained by stratum alone, summarised across the 16 spatial extents. Higher values indicate stronger confounding with the sampling stratification.") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r confounding-by-scale, fig.height=6}
+ggplot(confounding %>% filter(term != "sac"),
+       aes(x = extent_radius_m, y = r2_on_strata, colour = term)) +
+  geom_line(linewidth = 0.7) +
+  geom_point(size = 1) +
+  scale_x_log10() +
+  facet_wrap(~ species, ncol = 3) +
+  labs(
+    title    = "Confounding between habitat predictors and sampling stratum",
+    subtitle = "Proportion of predictor variance explained by stratum, by spatial extent",
+    x = "Buffer radius (m, log scale)",
+    y = expression(R^2~"of predictor on stratum"),
+    colour = "Predictor"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(legend.position = "bottom")
+```
+
+## Does the fixed specification inflate variance?
+
+```{r vif-computation}
+vif_results <- pmap_dfr(
+  expand_grid(jobs, extent_radius_m = all_scales,
+              include_strata = c(FALSE, TRUE)),
+  function(species, period, extent_radius_m, include_strata) {
+    d   <- get_period_data(species, period)
+    res <- compute_vif(d, base_covars[[species]], extent_radius_m, include_strata)
+    if (is.null(res)) return(NULL)
+    res %>% mutate(species = species, period = period,
+                   extent_radius_m = extent_radius_m,
+                   spec = if (include_strata) "Fixed effect" else "Random intercept")
+  }
+)
+
+# Habitat predictors only; the stratum dummies are summarised separately below
+vif_covars <- vif_results %>%
+  filter(term %in% unlist(base_covars))
+
+vif_summary <- vif_covars %>%
+  group_by(species, term, spec) %>%
+  summarise(vif_median = median(vif, na.rm = TRUE),
+            vif_max    = max(vif, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = spec, values_from = c(vif_median, vif_max),
+              names_sep = "_") %>%
+  mutate(inflation = `vif_median_Fixed effect` / `vif_median_Random intercept`) %>%
+  arrange(desc(inflation))
+
+kable(vif_summary, digits = 2,
+      caption = "**Table S8.8.** Variance inflation factors for the habitat predictors under each specification, summarised across the 16 spatial extents. The 'Random intercept' columns are the VIFs among the fixed effects when no stratum term is present. `inflation` is the ratio of median VIFs. Values above 5 are conventionally regarded as problematic.") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+
+cat("Max VIF for any habitat predictor, random-intercept design:",
+    round(max(vif_covars$vif[vif_covars$spec == "Random intercept"], na.rm = TRUE), 2), "\n")
+cat("Max VIF for any habitat predictor, fixed-effect design:    ",
+    round(max(vif_covars$vif[vif_covars$spec == "Fixed effect"],     na.rm = TRUE), 2), "\n")
+
+# Stratum dummies under the fixed specification
+vif_strata <- vif_results %>%
+  filter(spec == "Fixed effect", str_starts(term, "strata")) %>%
+  group_by(species) %>%
+  summarise(vif_median = median(vif, na.rm = TRUE),
+            vif_max    = max(vif, na.rm = TRUE), .groups = "drop")
+
+kable(vif_strata, digits = 2,
+      col.names = c("Species", "Median VIF", "Max VIF"),
+      caption = "**Table S8.9.** Variance inflation factors for the stratum dummy variables under the fixed-effect specification.") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Standard errors of the affected predictors
+
+If fixed strata genuinely damage estimation, it should show up as wider
+confidence intervals, not only as higher VIFs.
+
+```{r se-comparison}
+se_comparison <- results %>%
+  group_by(species, term, spec) %>%
+  summarise(se_median = median(std.error, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = spec, values_from = se_median) %>%
+  mutate(se_ratio = `Fixed effect` / `Random intercept`) %>%
+  arrange(desc(se_ratio))
+
+kable(se_comparison, digits = 3,
+      col.names = c("Species", "Predictor", "Median SE (random)",
+                    "Median SE (fixed)", "Ratio"),
+      caption = "**Table S8.10.** Median standard errors of the habitat predictors under each specification. A ratio above 1 means the fixed specification estimates that predictor less precisely.") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+# Residual Diagnostics
+
+DHARMa scaled residuals under both specifications, at a single mid-range extent
+per species x period to keep runtime manageable. Widen `dharma_scales` to check
+more extents.
+
+```{r dharma}
+dharma_scales <- all_scales[round(length(all_scales) / 2)]
+
+dharma_results <- expand_grid(jobs, extent_radius_m = dharma_scales,
+                              spec = c("random", "fixed")) %>%
+  pmap_dfr(function(species, period, extent_radius_m, spec) {
+    d      <- get_period_data(species, period)
+    covars <- base_covars[[species]]
+    mod    <- fit_nb_glmm(d, covars, extent_radius_m, strata_effect = spec)
+    if (is.null(mod)) {
+      return(tibble(species = species, period = period, spec = spec,
+                    ks_p = NA_real_, dispersion_p = NA_real_, outlier_p = NA_real_))
+    }
+    sim <- simulateResiduals(mod, n = 250, plot = FALSE)
+    tibble(
+      species = species, period = period, spec = spec,
+      ks_p         = testUniformity(sim,  plot = FALSE)$p.value,
+      dispersion_p = testDispersion(sim,  plot = FALSE)$p.value,
+      outlier_p    = testOutliers(sim,    plot = FALSE)$p.value
+    )
+  })
+
+kable(dharma_results, digits = 3,
+      caption = paste0("**Table S8.5.** DHARMa diagnostic p-values at the ",
+                       dharma_scales, " m extent under both specifications. ",
+                       "Values below 0.05 indicate residual structure.")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+# Model Comparison by AIC
+
+Both specifications are fitted by maximum likelihood to identical data, so their
+AIC values are comparable. Note that the effective degrees of freedom of a
+random intercept are not integer-valued, so the comparison is indicative rather
+than decisive.
+
+```{r aic-comparison}
+aic_tab <- results_raw %>%
+  distinct(species, period, extent_radius_m, spec, AIC) %>%
+  pivot_wider(names_from = spec, values_from = AIC) %>%
+  mutate(delta_AIC = fixed - random) %>%
+  group_by(species, period) %>%
+  summarise(
+    n_extents        = n(),
+    median_delta_AIC = median(delta_AIC, na.rm = TRUE),
+    n_random_better  = sum(delta_AIC > 2,  na.rm = TRUE),
+    n_fixed_better   = sum(delta_AIC < -2, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+kable(aic_tab, digits = 2,
+      col.names = c("Species", "Period", "Extents", "Median dAIC (fixed - random)",
+                    "Random better (dAIC > 2)", "Fixed better (dAIC < -2)"),
+      caption = "**Table S8.6.** AIC comparison across spatial extents. Positive median dAIC favours the random-intercept specification.") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+# Would Predictor Selection Change?
+
+The base predictor sets used in the profile comparison above were selected by the
+dredge procedure under the random-intercept specification. Selecting under one
+model structure and inferring under another is inconsistent, so selection has to
+be re-run under the specification the analysis actually uses.
+
+This section re-runs the full dredge under both specifications and compares the
+resulting variable-importance rankings. The rankings under the fixed
+specification are the ones S7 now uses; the random-intercept column is retained
+so the difference is visible.
+
+**Runtime warning.** This is the expensive chunk: 6 combinations x 6 months for
+horses, 15 x 2 for cattle and 15 x 2 for elk, each across 16 extents and two
+specifications, is 3,072 model fits. Set `run_both_specs <- FALSE` to fit only
+the fixed specification and compare against the S7 rankings by hand.
+
+```{r dredge-comparison}
+run_both_specs <- TRUE
+
+dredge_covars <- c("p_herb", "p_shrub", "p_harvest", "p_wetland", "hu", "tri")
+covar_budget  <- list(Horse = 5, Cattle = 4, Elk = 2)
+
+# ── Duplicated from S7, with strata_effect threaded through ──
+dredge_at_scale <- function(data, k, scale_m, covars_to_dredge,
+                            strata_effect = "random") {
+  combos <- combn(covars_to_dredge, k, simplify = FALSE)
+
+  map_dfr(combos, function(covars) {
+    mod <- fit_nb_glmm(data, covars, scale_m, strata_effect = strata_effect)
+    tibble(
+      covars          = paste(sort(covars), collapse = "+"),
+      AIC             = if (is.null(mod)) NA_real_ else AIC(mod),
+      extent_radius_m = scale_m
+    )
+  }) %>%
+    filter(!is.na(AIC)) %>%
+    mutate(
+      delta_AIC  = AIC - min(AIC),
+      aic_weight = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))
+    )
+}
+
+# ── Duplicated verbatim from S7 ──
+compute_variable_importance <- function(dredge_results, covars_to_dredge) {
+  map_dfr(covars_to_dredge, function(cv) {
+    containing <- dredge_results %>%
+      filter(map_lgl(covars, ~ cv %in% str_split(.x, "\\+")[[1]]))
+    tibble(
+      covariate             = cv,
+      cumulative_aic_weight = sum(containing$aic_weight, na.rm = TRUE),
+      n_top_model           = sum(containing$delta_AIC == 0, na.rm = TRUE),
+      n_models              = nrow(containing)
+    )
+  }) %>%
+    arrange(desc(cumulative_aic_weight))
+}
+
+specs_to_run <- if (run_both_specs) c("random", "fixed") else "fixed"
+
+dredge_grid <- expand_grid(jobs, extent_radius_m = all_scales,
+                           spec = specs_to_run)
+
+cat("Dredge cells:", nrow(dredge_grid), "\n")
+cat("Approximate model fits:",
+    sum(choose(length(dredge_covars),
+               unlist(covar_budget[as.character(dredge_grid$species)]))), "\n")
+
+dredge_all <- future_pmap_dfr(
+  dredge_grid,
+  function(species, period, extent_radius_m, spec) {
+    d <- get_period_data(species, period)
+    dredge_at_scale(d, covar_budget[[species]], extent_radius_m,
+                    dredge_covars, strata_effect = spec) %>%
+      mutate(species = species, period = period, spec = spec)
+  },
+  .options  = furrr_options(seed = TRUE),
+  .progress = TRUE
+)
+```
+
+```{r selection-comparison}
+importance_by_spec <- dredge_all %>%
+  group_by(species, spec) %>%
+  group_modify(~ compute_variable_importance(.x, dredge_covars)) %>%
+  ungroup() %>%
+  group_by(species, spec) %>%
+  mutate(rank = rank(-cumulative_aic_weight, ties.method = "first")) %>%
+  ungroup()
+
+# Side-by-side ranking table
+ranking_table <- importance_by_spec %>%
+  dplyr::select(species, spec, covariate, cumulative_aic_weight, rank) %>%
+  pivot_wider(names_from = spec,
+              values_from = c(cumulative_aic_weight, rank),
+              names_sep = "_") %>%
+  arrange(species)
+
+kable(ranking_table, digits = 3,
+      # Display label only. The underlying column stays `covariate`, which is
+      # what importance_by_spec and the dredge output are keyed on.
+      col.names = sub("^covariate$", "Predictor", names(ranking_table)),
+      caption = "**Table S8.11.** Cumulative AIC weight and rank for each dredge-eligible predictor under both specifications. Ranks above each species' budget form the base model set.") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+
+# The decision: does the selected base set change?
+selected_sets <- importance_by_spec %>%
+  group_by(species, spec) %>%
+  filter(rank <= covar_budget[[first(species)]]) %>%
+  summarise(base_set = paste(sort(covariate), collapse = ", "), .groups = "drop") %>%
+  pivot_wider(names_from = spec, values_from = base_set)
+
+if (run_both_specs) {
+  selected_sets <- selected_sets %>%
+    mutate(unchanged = random == fixed)
+}
+
+kable(selected_sets,
+      caption = "**Table S8.12.** Selected base predictor set under each specification. `unchanged = TRUE` means adopting fixed stratum effects requires no change to predictor selection.") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+
+if (run_both_specs) {
+  cat("\nBase set unchanged for",
+      sum(selected_sets$unchanged, na.rm = TRUE), "of",
+      nrow(selected_sets), "species.\n")
+  # Sanity check against the sets used earlier in this document
+  cat("\nSets used in the profile comparison above:\n")
+  for (sp in names(base_covars)) {
+    cat("  ", sp, ":", paste(sort(base_covars[[sp]]), collapse = ", "), "\n")
+  }
+}
+```
+
+# Save Results
+
+```{r save}
+write_csv(comparison,      file.path(output_dir, "profile_comparison.csv"))
+write_csv(confounding_summary, file.path(output_dir, "covariate_strata_confounding.csv"))
+write_csv(vif_summary,     file.path(output_dir, "vif_comparison.csv"))
+write_csv(se_comparison,   file.path(output_dir, "se_comparison.csv"))
+write_csv(varcomp,         file.path(output_dir, "variance_components.csv"))
+write_csv(results,         file.path(output_dir, "coefficients_both_specs.csv"))
+write_csv(dharma_results,  file.path(output_dir, "dharma_both_specs.csv"))
+write_csv(ranking_table,   file.path(output_dir, "selection_ranking_by_spec.csv"))
+write_csv(selected_sets,   file.path(output_dir, "selected_base_sets.csv"))
+
+cat("Results written to", output_dir, "\n")
+```
+
+# Conclusion
+
+```{r conclusion-numbers, include=FALSE}
+# Scalars quoted in the prose below, computed from the objects above so the
+# text cannot drift from the tables. No models are fitted here.
+n_singular      <- sum(varcomp$n_near_zero, na.rm = TRUE)
+n_varcomp_total <- sum(varcomp$n_models,    na.rm = TRUE)
+n_singular_elk  <- sum(varcomp$n_near_zero[varcomp$species == "Elk"], na.rm = TRUE)
+n_elk_total     <- sum(varcomp$n_models[varcomp$species == "Elk"],    na.rm = TRUE)
+
+n_fixed_favoured <- sum(aic_tab$median_delta_AIC < 0, na.rm = TRUE)
+n_periods_total  <- nrow(aic_tab)
+
+n_converged <- results_raw %>%
+  distinct(species, period, extent_radius_m, spec, converged) %>%
+  pull(converged) %>% sum(na.rm = TRUE)
+n_fits <- nrow(fit_grid)
+
+vif_max_fixed  <- max(vif_covars$vif[vif_covars$spec == "Fixed effect"],     na.rm = TRUE)
+vif_max_random <- max(vif_covars$vif[vif_covars$spec == "Random intercept"], na.rm = TRUE)
+
+n_se_parity    <- sum(abs(se_comparison$se_ratio - 1) < 0.05, na.rm = TRUE)
+n_se_better    <- sum(se_comparison$se_ratio < 1, na.rm = TRUE)
+n_se_total     <- nrow(se_comparison)
+
+n_peak_match   <- sum(comparison$peak_match,   na.rm = TRUE)
+n_domain_match <- sum(comparison$domain_match, na.rm = TRUE)
+n_profiles     <- nrow(comparison)
+```
+
+Habitat stratum is fitted as a fixed effect in the main analysis. The evidence
+above supports that specification on four counts.
+
+**The random intercept was not estimating what it was asked to estimate.** The
+stratum standard deviation came back at or below 1e-4 in `r n_singular` of
+`r n_varcomp_total` fits, including `r n_singular_elk` of `r n_elk_total` elk
+fits (Table S8.1). At those values partial pooling has run to completion: all
+five stratum baselines are shrunk onto a single number and the fitted model is
+equivalent to one carrying no stratum term at all. Elk are detected several times
+more often in harvest than in forest, so a stratum standard deviation of
+effectively zero is not a finding about the strata, it is an estimation failure,
+and it is silent.
+
+**AIC prefers the fixed specification.** The median difference in AIC favours
+the fixed effect in `r n_fixed_favoured` of `r n_periods_total` species-period
+combinations, usually at all 16 spatial extents (Table S8.6). The fixed
+specification carries three more estimated parameters than the random one (four
+contrasts against one variance), so it wins these comparisons after being
+charged a six-unit penalty for them.
+
+**The collinearity cost that would argue for partial pooling does not
+materialise.** All `r n_converged` of `r n_fits` fits converged under both
+specifications. No variance inflation factor for a habitat predictor exceeds
+`r round(vif_max_fixed, 2)` under the fixed specification against
+`r round(vif_max_random, 2)` under the random one, both below the
+conventional threshold of 5 (Table S8.8). Median standard errors are within 5%
+of parity for `r n_se_parity` of `r n_se_total` species-predictor combinations,
+and `r n_se_better` are estimated more precisely under the fixed specification
+(Table S8.10).
+
+**The reported inference is largely preserved, and where it moves it moves at
+fine extents.** Of the `r n_profiles` species-period-predictor profiles,
+`r n_peak_match` have an identical peak scale of effect and `r n_domain_match`
+have identical domain structure under the two specifications (Table S8.2).
+Cell-level sign classification agrees in `r agreement$n_agree` of
+`r agreement$n_cells` cells (`r round(agreement$pct_agree, 1)`%) and the point
+estimates correlate at r = `r round(agreement$r_estimates, 3)` (Table S8.3).
+
+The changes are concentrated where the confounding is. Stratum explains a large
+share of the variance in proportion cutblock harvest and human use intensity at
+the finest extents and almost none beyond 3 km (Table S8.7), so
+under the random intercept a stratum difference left unabsorbed had a fine-scale
+predictor available to attach itself to. That is the mechanism behind the
+profiles that change, and it is why broad-scale inference is unaffected: at
+7 km there is nothing left to leak.
+
+One consequence follows for how the main results read. Under the fixed
+specification the habitat predictor coefficients are within-stratum
+associations. A fine-scale coefficient answers whether the surrounding landscape
+predicts detection rate over and above the stratum the camera sits in, and that
+conditioning weakens as extent increases and the predictor comes to describe the
+surrounding landscape rather than the camera location itself.

@@ -1,13 +1,17 @@
-CC0 1.0 Universal (CC0 1.0) — Public Domain Dedication
+CC0 1.0 Universal (CC0 1.0): Public Domain Dedication
 
-This LICENSE.data file governs the CSV data files in this repository's
-`input/` directory, the species icon PNGs in `input/`, the manuscript
-photograph in `figures/`, and the pre-rendered figures in
-`output/scale_analysis/figures/`. It does NOT govern source code; code
+This LICENSE.data file governs the eight CSV data files in this
+repository's `input/` directory. It does NOT govern source code; code
 in this repository is released under the MIT License (see `LICENSE`).
 
-The same data are deposited canonically on Dryad under CC0 1.0:
-[DRYAD_DOI_PLACEHOLDER]
+It also does NOT govern the species icon PNGs in `input/`, the
+photograph in `figures/`, or the rendered figures in `output/`. Those
+files are provided so that the documents render and the analysis can
+be reproduced; reuse terms for figures that appear in the article
+follow the licence of the published article.
+
+The same data are deposited on Dryad under CC0 1.0:
+DOI: 10.5061/dryad.vhhmgqp8k
 
 ────────────────────────────────────────────────────────────────────────
 

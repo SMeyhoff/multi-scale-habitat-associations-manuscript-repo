@@ -1,6 +1,6 @@
 ---
 title: "Supporting Information S5: Overdispersion Diagnostics and Negative Binomial Model Selection"
-subtitle: "Multi-scale habitat associations of large grazers in Alberta's foothills"
+subtitle: "Spatiotemporal dynamics in scale of effect: multi-scale habitat associations of three large grazers across the growing season"
 author: "anon"
 date: "`r Sys.Date()`"
 output:
@@ -27,7 +27,7 @@ p.caption {
 
 ## Overview
 
-This appendix presents the diagnostic evidence supporting the choice of negative binomial (NB2) GLMMs over Poisson or zero-inflated alternatives. Three lines of evidence are presented: (1) variance-to-mean ratios (VMR) confirming overdispersion, (2) NB dispersion parameter (θ) estimates quantifying the severity of overdispersion, and (3) an assessment of zero proportions, showing that the high frequency of zero counts is a predictable consequence of the NB2 distribution at the estimated parameters rather than evidence of a separate zero-generating process.
+This appendix presents the diagnostic evidence supporting the choice of negative binomial (NB2) GLMs over Poisson or zero-inflated alternatives. Three lines of evidence are presented: (1) variance-to-mean ratios (VMR) confirming overdispersion, (2) NB dispersion parameter (θ) estimates quantifying the severity of overdispersion, and (3) an assessment of zero proportions, showing that the high frequency of zero counts is a predictable consequence of the NB2 distribution at the estimated parameters rather than evidence of a separate zero-generating process.
 
 ## Setup
 

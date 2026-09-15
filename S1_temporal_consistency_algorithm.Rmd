@@ -1,6 +1,6 @@
 ---
 title: "Supporting Information S1: Temporal Consistency Cloud Filtering Algorithm"
-subtitle: "Multi-scale habitat associations of large grazers in Alberta's foothills"
+subtitle: "Spatiotemporal dynamics in scale of effect: multi-scale habitat associations of three large grazers across the growing season"
 author: "anon"
 date: "`r Sys.Date()`"
 output:
@@ -16,7 +16,7 @@ output:
 
 PlanetScope imagery is susceptible to cloud and haze contamination that can produce anomalous NDVI values. We took advantage of our high temporal resolution by developing a temporal consistency algorithm that identifies anomalous pixels by comparing each bi-weekly mosaic to its temporal neighbours, using phenologically informed thresholds derived from the pooled 2022--2024 time series.
 
-The algorithm was implemented in Python (NumPy, rasterio) and applied to all PlanetScope NDVI mosaics prior to extraction of camera-level summaries. The full processing script is available at `python/planet_cloud_filtering.ipynb`.
+The algorithm was implemented in Python (NumPy, rasterio) and applied to all PlanetScope NDVI mosaics prior to extraction of camera-level summaries. The full processing script is available at `Python/phase2_cloud_filtering.ipynb`.
 
 ## Algorithm Steps
 
@@ -63,4 +63,4 @@ For the first period in each year, only forward comparison was available; for th
 
 ### Step 5: Output
 
-Filtered mosaics were saved in the same format and grid as the input mosaics, with cloud-contaminated pixels set to `NaN`. Downstream NDVI extraction (camera-level buffer summaries) used only non-`NaN` pixels, ensuring that cloud-affected areas did not contribute to habitat covariate values.
+Filtered mosaics were saved in the same format and grid as the input mosaics, with cloud-contaminated pixels set to `NaN`. Downstream NDVI extraction (camera-level buffer summaries) used only non-`NaN` pixels, ensuring that cloud-affected areas did not contribute to habitat predictor values.
