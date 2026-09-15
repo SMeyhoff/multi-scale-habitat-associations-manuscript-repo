@@ -178,6 +178,9 @@ ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "input
 SPECIES_ICONS = [("horse.png", "#5C2E0A"),   # dark chestnut brown
                  ("cow.png",   "#000000"),   # black
                  ("elk.png",   "#708090")]   # slate blue-grey
+# Alpha caps from S7_Main_analysis.Rmd (ensure_transparent alpha_value), so the
+# icons composite to the same shade as in Figure 3.
+ICON_ALPHA = {"horse.png": 0.60, "cow.png": 0.95, "elk.png": 0.60}
 
 def _png_size(path):
     """Width and height from the PNG IHDR chunk (stdlib only)."""
@@ -185,20 +188,35 @@ def _png_size(path):
         return struct.unpack(">II", fh.read(24)[16:24])
 
 def _icon_uri(path, colour):
-    """Base64 data URI for one icon, tinted to `colour`.
+    """Base64 data URI for one icon, prepared exactly as the domain bar chart
+    (Figure 3) prepares it in S7_Main_analysis.Rmd (ensure_transparent, then
+    colorize_icon):
 
-    Pillow, when installed, replaces the greyscale channel with a flat colour
-    while keeping the alpha mask, matching how these icons are treated in the
-    domain bar chart. Without Pillow the icon is embedded unchanged and renders
-    as a black silhouette: the figure is still correct, only not colour-matched.
+      1. near-white pixels (grey > 0.9) become fully transparent;
+      2. every other pixel's alpha is capped at ICON_ALPHA (0.60 horse and
+         elk, 0.95 cattle);
+      3. the silhouette is filled with the species colour.
+
+    Step 1 matters for the elk: its PNG has opaque near-white pixels between
+    the antler tines. Tinting by alpha alone (the approach used until
+    2026-09-15) filled that gap in as a blotch.
+
+    Requires Pillow. Without it the icon is embedded unchanged and renders as a
+    black silhouette (with the same antler blotch): the figure is still
+    correct, only not matched to Figure 3.
     """
     try:
         import io
         from PIL import Image
-        src = Image.open(path).convert("RGBA")
+        la = Image.open(path).convert("LA")
+        grey, alpha = la.split()
+        cap = int(round(255 * ICON_ALPHA.get(os.path.basename(path), 0.60)))
+        white = grey.point(lambda v: 255 if v > 0.9 * 255 else 0)
+        alpha = Image.composite(Image.new("L", la.size, 0),
+                                alpha.point(lambda a: min(a, cap)), white)
         rgb = tuple(int(colour[i:i + 2], 16) for i in (1, 3, 5))
-        tinted = Image.new("RGBA", src.size, rgb + (255,))
-        tinted.putalpha(src.getchannel("A"))
+        tinted = Image.new("RGBA", la.size, rgb + (255,))
+        tinted.putalpha(alpha)
         buf = io.BytesIO()
         tinted.save(buf, format="PNG")
         data = buf.getvalue()
