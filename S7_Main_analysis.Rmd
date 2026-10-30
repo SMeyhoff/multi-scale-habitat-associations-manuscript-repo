@@ -58,7 +58,7 @@ library(officer)    # provides fp_border() used by flextable::hline() for styled
 n_cores <- parallel::detectCores() - 1
 plan(multisession, workers = n_cores)
 
-# Paths (all relative to the SI_review directory that holds this Rmd)
+# Paths (all relative to the repository root, which holds this Rmd)
 base_path  <- "."
 data_file  <- file.path(base_path, "input",  "analysis_ready_multiscale.csv")
 output_dir <- file.path(base_path, "output", "scale_analysis")
@@ -69,13 +69,45 @@ dir.create(fig_dir,    recursive = TRUE, showWarnings = FALSE)
 
 # Key figures
 
-The three subsections below show the central figures of the analysis up front, so that readers do not need to page through ~3,000 lines of analytical code to see the results. The figures are embedded from pre-rendered PNGs that the analytical workflow below produces on each knit; the code that generates them lives in sections 10 (continuous scale-of-effect profiles) and 11 (domain bar charts, under *Summary Tables*). If the PNGs do not yet exist (e.g. on a fresh clone of the repository where the figures have not been committed), each subsection will render a placeholder message.
+The three subsections below show the central figures of the analysis up front, so that readers do not need to page through ~3,000 lines of analytical code to see the results. The figures are embedded from pre-rendered PNGs that the analytical workflow below produces on each knit; the code that generates them lives in sections 11 (continuous scale-of-effect profiles) and 12 (domain bar charts, under *Summary Tables*). If the PNGs do not yet exist (e.g. on a fresh clone of the repository where the figures have not been committed), each subsection will render a placeholder message.
 
 ## Scale-of-effect profiles by predictor
 
-Each of the seven panels below shows the estimated coefficient (log-rate scale) for one habitat predictor as a function of buffer radius, with separate curves per species × month (horse monthly; cattle bimonthly; elk quarterly). Ribbons are 95 % CIs from the fitted multivariate NB GLMs; non-zero domains are the contiguous buffer ranges where the 95 % CI excludes zero. Multivariate models are shown of the left, univariate on the right. See Section 10 for the code that produces these.
+Each of the seven panels below shows the estimated coefficient (log-rate scale) for one habitat predictor as a function of buffer radius, with separate curves per species × month (horse monthly; cattle bimonthly; elk quarterly). Ribbons are 95 % CIs from the fitted multivariate NB GLMs; non-zero domains are the contiguous buffer ranges where the 95 % CI excludes zero. Multivariate models are shown on the left, univariate on the right. See Section 11 for the code that produces these.
 
-```{r key-fig-scale-of-effect, echo=FALSE, out.width="100%", fig.align="center"}
+```{r key-fig-captions, include=FALSE}
+# Captions for the Key figures (Figures S7.1 to S7.9), in the order the
+# scale-of-effect figures are embedded below.
+se_names <- c(NDVI_herb = "herbaceous NDVI",
+              hu        = "human use intensity",
+              p_harvest = "proportion harvest land cover",
+              p_herb    = "proportion herbaceous land cover",
+              p_shrub   = "proportion shrub land cover",
+              p_wetland = "proportion wetland land cover",
+              tri       = "terrain ruggedness")
+se_caps <- paste0(
+  "**Figure S7.", seq_along(se_names), ".** Scale-of-effect profiles for ",
+  se_names, " across the 16 spatial extents (40 m to 7.2 km buffer radius). ",
+  "Rows are species. The left column shows the multivariate models used in the ",
+  "main analysis, by each species' periods (horses monthly, cattle bimonthly, ",
+  "elk quarterly); the right column shows exploratory univariate models (the ",
+  "predictor with the spatial autocovariate and stratum), monthly for all three ",
+  "species. Lines are standardized coefficients (log-rate scale) with shaded 95% ",
+  "confidence intervals; each panel's subtitle lists the model's predictors. ",
+  "Panels marked “(sub)” are substitution models, in which the predictor ",
+  "replaced one in the species' base model. The y-axis is fixed at −1 to 1 for ",
+  "comparison across predictors, so a few estimates and intervals extend beyond it.",
+  ifelse(names(se_names) == "NDVI_herb",
+         paste0(" The asterisk in the title marks that herbaceous NDVI was ",
+                "evaluated only by substitution; its univariate panels are ",
+                "bivariate models with proportion herbaceous land cover."),
+         "")
+)
+se_caps_present <- se_caps[file.exists(file.path(
+  fig_dir, paste0("scale_of_effect_", names(se_names), ".png")))]
+```
+
+```{r key-fig-scale-of-effect, echo=FALSE, out.width="100%", fig.align="center", fig.cap=se_caps_present}
 scale_effect_paths <- file.path(
   fig_dir,
   c("scale_of_effect_NDVI_herb.png",
@@ -96,9 +128,9 @@ if (length(existing_se) > 0) {
 
 ## Domain bar chart: multivariate models (Figure 3 in manuscript)
 
-The domain bar chart summarises every scale-of-effect profile as a set of coloured segments: blue segments mark contiguous buffer ranges with a positive non-zero domain (95 % CI > 0 throughout), red segments mark negative domains, and unmarked ranges indicate CI-crossing zero. Filled diamonds mark the scale of effect within each domain (largest |β|); filled stars mark the global peak across a species × period × predictor profile. Brackets connect same-sign split domains whose peak-scale CIs overlap, indicating statistical indistinguishability in effect magnitude. See §11.4 for code.
+The domain bar chart summarises every scale-of-effect profile as a set of coloured segments: blue segments mark contiguous buffer ranges with a positive non-zero domain (95 % CI > 0 throughout), red segments mark negative domains, and unmarked ranges indicate CI-crossing zero. Filled diamonds mark the scale of effect within each domain (largest |β|); filled stars mark the global peak across a species × period × predictor profile. Brackets connect same-sign split domains whose peak-scale CIs overlap, indicating statistical indistinguishability in effect magnitude. See §12.5 for code.
 
-```{r key-fig-domain-bars-mv, echo=FALSE, out.width="100%", fig.align="center"}
+```{r key-fig-domain-bars-mv, echo=FALSE, out.width="100%", fig.align="center", fig.cap="**Figure S7.8.** Domains of scale for the multivariate models (Figure 3 in the main text). Each bar is one species–period–predictor profile across the 16 extents. Blue and red segments are positive and negative domains (95% confidence interval excluding zero throughout); diamonds mark the peak within each domain, stars the global peak where a profile has more than one domain, and brackets join same-sign domains whose peak effect sizes are statistically indistinguishable."}
 domain_mv_path <- file.path(fig_dir, "domain_bar_chart.png")
 if (file.exists(domain_mv_path)) {
   knitr::include_graphics(domain_mv_path)
@@ -117,7 +149,7 @@ This tests which scale-of-effect features are driven by the predictor itself ver
 
 In evaluating the agreement between multivariate (MV) and univariate (UV) models for horses (the 42 horse profiles with matched temporal structure (6 months × 7 predictors)) the UV analysis reproduced the MV domain sign at the global peak in 24 of the 29 profiles for which MV models detected a non-zero domain (83%). UV models produced 7% more domains overall (46 vs. 43 in MV models). UV peak scale of effect within each of the 43 MV non-zero domains agreed 44% of the time (54% within ±1 buffer), and global peak scales of effect agreed 36% of the time (52% within ±1 buffer). Cell-level agreement across all 672 buffers (6 months * 7 predictors * 16 buffers) agreed on sign 78% of the time. The 22% disagreement was only between null and signed domains; there were no sign reversals (§ 12.7). 
 
-```{r key-fig-domain-bars-uni, echo=FALSE, out.width="100%", fig.align="center"}
+```{r key-fig-domain-bars-uni, echo=FALSE, out.width="100%", fig.align="center", fig.cap="**Figure S7.9.** Domains of scale for the exploratory univariate models, monthly for all three species. Symbols as in Figure S7.8."}
 domain_uni_path <- file.path(fig_dir, "domain_bar_chart_univariate.png")
 if (file.exists(domain_uni_path)) {
   knitr::include_graphics(domain_uni_path)
@@ -350,8 +382,8 @@ fit_nb_glmm <- function(data, covars, scale_m, standardize = TRUE) {
   }
 
   # Build formula: n_det ~ covars + sac + strata + offset(log_effort)
-  # Habitat stratum is a FIXED effect (changed 2026-08-27 in response to
-  # Reviewer 1 item 16; justification in Supporting Information S8). With five
+  # Habitat stratum is a FIXED effect (justification in Supporting
+  # Information S8). With five
   # strata that constitute the sampling design rather than a sample from a
   # wider population, and with stratum strongly confounded with the fine-scale
   # predictors, partial pooling left residual stratum signal to be attributed
@@ -732,7 +764,7 @@ horse_all_results <- bind_rows(
   horse_ndvi_bivar_results %>% mutate(covar_source = "univariate")
 )
 
-# Disabled for JAE submission, intermediate artefact, not used by S1–S6 or Dryad.
+# Disabled: intermediate artefact, not used by S1–S6 or Dryad.
 # write_csv(horse_all_results,
 #           file.path(output_dir, "horse_model_results.csv"))
 ```
@@ -907,7 +939,7 @@ cattle_all_results <- bind_rows(
   cattle_ndvi_bivar_results %>% mutate(covar_source = "univariate")
 )
 
-# Disabled for JAE submission, intermediate artefact, not used by S1–S6 or Dryad.
+# Disabled: intermediate artefact, not used by S1–S6 or Dryad.
 # write_csv(cattle_all_results,
 #           file.path(output_dir, "cattle_model_results.csv"))
 ```
@@ -1146,7 +1178,7 @@ elk_all_results <- bind_rows(
   elk_ndvi_bivar_results %>% mutate(covar_source = "univariate")
 )
 
-# Disabled for JAE submission, intermediate artefact, not used by S1–S6 or Dryad.
+# Disabled: intermediate artefact, not used by S1–S6 or Dryad.
 # write_csv(elk_all_results,
 #           file.path(output_dir, "elk_model_results.csv"))
 ```
@@ -1287,7 +1319,7 @@ dharma_elk <- run_dharma_batch(
 
 dharma_all <- bind_rows(dharma_horse, dharma_cattle, dharma_elk)
 
-# Disabled for JAE submission, diagnostic dump, not used by S1–S6 or Dryad.
+# Disabled: diagnostic dump, not used by S1–S6 or Dryad.
 # write_csv(dharma_all, file.path(output_dir, "dharma_diagnostics.csv"))
 ```
 
@@ -1319,7 +1351,7 @@ cat("\nFlagged models:", nrow(flagged), "of", nrow(dharma_all), "\n")
 # the DHARMa summary kable above and in the exported CSV. Intermediate
 # printout suppressed in SI.
 
-# Disabled for JAE submission, diagnostic dump, not used by S1–S6 or Dryad.
+# Disabled: diagnostic dump, not used by S1–S6 or Dryad.
 # write_csv(flagged, file.path(output_dir, "dharma_flagged_models.csv"))
 ```
 
@@ -1334,7 +1366,7 @@ all_results <- bind_rows(
   elk_all_results %>% mutate(species = "Elk")
 )
 
-# Disabled for JAE submission, intermediate artefact, not used by S1–S6 or Dryad.
+# Disabled: intermediate artefact, not used by S1–S6 or Dryad.
 # write_csv(all_results, file.path(output_dir, "all_model_results.csv"))
 
 # Create a clean plotting dataset: one row per species x period x scale x predictor
@@ -1389,7 +1421,7 @@ plot_data_clean <- plot_data %>%
        covariate == "NDVI_herb")
   )
 
-# Disabled for JAE submission, not read by S1–S6 or included in Dryad.
+# Disabled: not read by S1–S6 or included in Dryad.
 # write_csv(plot_data_clean, file.path(output_dir, "plot_ready_results.csv"))
 
 cat("Plot-ready results:", nrow(plot_data_clean), "rows\n")
@@ -1398,8 +1430,8 @@ cat("Predictors represented:", paste(unique(plot_data_clean$covariate), collapse
 
 ```{r investigate-flagged}
 # ── SI-trimmed flagged-model audit ──
-# The full version of this chunk (see 02_multiscale_analysis_CI.Rmd in the
-# project root) refits every flagged / implausible model and prints a
+# The full version of this chunk, in the authors' working analysis,
+# refits every flagged / implausible model and prints a
 # DHARMa diagnostic panel for each. That output is an internal QA artefact
 #, not a reader-facing result, so the SI reports only the aggregate
 # counts, exports the suspect-model list as a CSV for reproducibility, and
@@ -1430,7 +1462,7 @@ cat(sprintf(
 ))
 
 # ---- 4. Export the suspect-model list ----
-# Disabled for JAE submission, diagnostic dump, not used by S1–S6 or Dryad.
+# Disabled: diagnostic dump, not used by S1–S6 or Dryad.
 # write_csv(suspect_models,
 #           file.path(output_dir, "dharma_suspect_models.csv"))
 
@@ -1566,7 +1598,7 @@ plot_data_clean <- plot_data_clean %>%
   )
 ```
 
-```{r scale-figures, fig.width=14, fig.height=12}
+```{r scale-figures, fig.width=14, fig.height=12, fig.show="hide"}
 # Shared log-scaled x-axis specification
 log_x_scale <- scale_x_log10(
   breaks = scale_breaks,
@@ -1782,6 +1814,8 @@ for (cv in habitat_covars) {
 }
 ```
 
+The seven figures built here are shown as Figures S7.1 to S7.7 under Key figures.
+
 ## Save figures
 
 ```{r save-figures, cache = FALSE}
@@ -1956,7 +1990,7 @@ ft <- flextable(selection_table) %>%
 ft
 
 # ── 7. Export as standalone Word doc for easy copy-paste ──
-# Disabled for JAE submission, docx convenience file and CSV not used by S1–S6 or Dryad.
+# Disabled: docx convenience file and CSV not used by S1–S6 or Dryad.
 # save_as_docx(ft, path = file.path(output_dir, "Table_1_covariate_selection.docx"))
 # write_csv(selection_table, file.path(output_dir, "covariate_selection_summary.csv"))
 # cat("Table 1 exported to:", file.path(output_dir, "Table_1_covariate_selection.docx"), "\n")
@@ -2027,8 +2061,8 @@ domain_summary <- domain_data %>%
 
 # ── Table render suppressed in SI ──
 # The full domain-by-domain table runs to ~100 rows and is fully
-# represented by (a) the manuscript domain table in §11.3 and (b) the
-# multivariate domain bar chart (Key figures §1.2 / §11.4). The raw
+# represented by (a) the domain table in §12.3 and (b) the
+# multivariate domain bar chart (Key figures §1.2 / §12.5). The raw
 # per-domain numbers are exported as domain_summary.csv.
 cat(sprintf("Multivariate domain summary: %d rows (see domain_summary.csv for raw values).\n",
             nrow(domain_summary)))
@@ -2071,13 +2105,13 @@ peer_summary <- domain_with_peak %>%
 # ── Table render suppressed in SI ──
 # The per-domain peer-scales table runs to ~80 rows. CI-overlap of peer
 # scales with the peak scale is visualised as connecting brackets in the
-# multivariate domain bar chart (Key figures §1.2 / §11.4). The raw list
+# multivariate domain bar chart (Key figures §1.2 / §12.5). The raw list
 # of peer scales per domain is exported as domain_peer_scales.csv.
 cat(sprintf("Multivariate peer-scale summary: %d domains with one or more CI-overlapping peer scales.\n",
             nrow(peer_summary)))
 ```
 
-## Manuscript table: domain sign and peak scale of effect (not in manuscript)
+## Domain sign and peak scale of effect by profile
 
 Wide-format summary table: one row per period (species grouped by
 `pack_rows`), one column per predictor. Cells show direction (+/−) and
@@ -2247,7 +2281,7 @@ table_display <- cell_wide %>%
   mutate(Period = period_display[as.character(Period)])
 
 # Plain CSV with HTML stripped
-# Disabled for JAE submission, manuscript-table CSV not used by S1–S6 or Dryad.
+# Disabled: domain-table CSV not used by S1–S6 or Dryad.
 # write_csv(
 #   table_display %>% mutate(across(everything(), ~ gsub("<[^>]+>", "", .x))),
 #   file.path(output_dir, "scale_of_effect_manuscript_table.csv")
@@ -2421,9 +2455,77 @@ for (j in seq_along(col_labels)) {
   }
 }
 
-# Disabled for JAE submission, docx convenience file, not used by S1–S6 or Dryad.
+# Disabled: docx convenience file, not used by S1–S6 or Dryad.
 # save_as_docx(ft2, path = file.path(output_dir, "Table_2_scale_of_effect.docx"))
 # cat("Table 2 exported to:", file.path(output_dir, "Table_2_scale_of_effect.docx"), "\n")
+```
+
+### Peak coefficients by profile
+
+The table below gives the size of each association at its peak, so that the
+direction and extent shown above can be read with a magnitude. Coefficients are
+standardized at each extent, so a coefficient is the change in log detection
+rate per standard deviation of the predictor at that extent.
+
+```{r peak-coefficient-table}
+# One row per species x period x predictor profile with at least one non-zero
+# domain. The peak is the global peak: the largest |coefficient| among scales
+# that lie in a non-zero domain (the star in the domain bar chart). The weakest
+# coefficient is the value, in the direction of the peak, at the scale where
+# the association is weakest; zero or opposite-sign values mean the association
+# disappeared or reversed at that scale.
+peak_labels <- c(
+  NDVI_herb = "Herbaceous NDVI",
+  hu        = "Human use",
+  p_harvest = "Prop. harvest cutblock",
+  p_herb    = "Prop. herbaceous",
+  p_shrub   = "Prop. shrub",
+  p_wetland = "Prop. wetland",
+  tri       = "Terrain ruggedness index"
+)
+
+peak_tab <- domain_data %>%
+  group_by(species, period, covariate) %>%
+  filter(any(domain_sign != "0")) %>%
+  summarise(
+    n_domains   = n_distinct(domain_id[domain_sign != "0"]),
+    peak_row    = which.max(ifelse(domain_sign != "0", abs(estimate), -Inf)),
+    peak_m      = extent_radius_m[peak_row],
+    peak_est    = estimate[peak_row],
+    peak_lo     = conf.low[peak_row],
+    peak_hi     = conf.high[peak_row],
+    weakest_est = sign(peak_est) * min(sign(peak_est) * estimate),
+    .groups     = "drop"
+  ) %>%
+  mutate(
+    species   = factor(species, levels = c("Horse", "Cattle", "Elk")),
+    period    = factor(period, levels = period_levels),
+    predictor = peak_labels[as.character(covariate)],
+    ci        = sprintf("%.2f to %.2f", peak_lo, peak_hi),
+    rate      = exp(peak_est)
+  ) %>%
+  arrange(species, period, predictor)
+
+kable(
+  peak_tab %>%
+    dplyr::select(species, period, predictor, n_domains, peak_m,
+                  peak_est, ci, rate, weakest_est),
+  digits    = c(0, 0, 0, 0, 0, 2, 0, 2, 2),
+  col.names = c("Species", "Period", "Predictor", "Domains", "Peak extent (m)",
+                "Coefficient", "95% CI", "Rate ratio", "Weakest coefficient"),
+  caption   = paste0(
+    "Peak standardized coefficient (log-rate scale) for each of the ",
+    nrow(peak_tab), " species–period–predictor profiles with at least ",
+    "one non-zero domain, from the multivariate models. Domains: number of ",
+    "non-zero domains in the profile. Rate ratio: exp(coefficient), the ",
+    "multiplicative change in detection rate per standard deviation of the ",
+    "predictor at the peak extent. Weakest coefficient: the coefficient at the ",
+    "extent where the association was weakest in the direction of the peak; zero ",
+    "or opposite-sign values mean the association disappeared or reversed there."
+  )
+) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
 ```
 
 ## Scale-of-effect variability across the growing season (horse) (Table 3 in manuscript)
@@ -2432,7 +2534,7 @@ We summarise how consistent the peak scale of effect is across horse
 monthly profiles (May–October, n = 6). For each predictor the peak is
 the *global peak* of the monthly profile, the scale with the largest |β̂|
 across all non-zero domains (same dominant-domain rule as the
-table in §11.3). We report (i) the number of months with a
+table in §12.3). We report (i) the number of months with a
 detected non-zero dominant domain, (ii) the range of peak buffer class
 across detections, and (iii) the SD of peak buffer class when three or
 more months contributed. Buffer class indexes the log-spaced scale grid
@@ -2451,13 +2553,13 @@ range or an SD-based variability estimate to be meaningful.
 #     log-spaced grid indexed 1 (40 m) to 16 (7223 m)
 #   - SD of peak buffer class, only when n_detected >= 3 (n=2 reduces
 #     to a single pairwise difference, n<=1 has no spread)
-# Inputs (already in memory from §11.2):
+# Inputs (already in memory from §12.2):
 #   - domain_summary: one row per (species, period, predictor, domain)
 #   - scale_breaks:   ordered buffer radii in metres (length 16)
 
 # Global peak per (period, predictor) for horse: the non-zero domain
 # with the largest |peak_estimate|. Mirrors the dominant-domain rule
-# used for the §11.3 manuscript table. Buffer-class index is matched
+# used for the §12.3 domain table. Buffer-class index is matched
 # against scale_breaks so that the table uses ordinal units (1–16)
 # rather than raw metres.
 profile_global_peak_horse <- domain_summary %>%
@@ -2593,7 +2695,7 @@ ft3 <- flextable(soE_variability_horse) %>%
 ft3
 
 # ── Export standalone Word doc for easy copy-paste into manuscript ──
-# Disabled for JAE submission, docx convenience file and CSV not used by S1–S6 or Dryad.
+# Disabled: docx convenience file and CSV not used by S1–S6 or Dryad.
 # save_as_docx(ft3,
 #              path = file.path(output_dir,
 #                               "Table_3_scale_of_effect_variability.docx"))
@@ -2620,7 +2722,7 @@ Species are grouped with visual separation; periods are ordered
 chronologically (earliest at top). Animal silhouette icons identify
 species groups.
 
-```{r domain-bars, fig.width=14, fig.height=16, cache=FALSE}
+```{r domain-bars, fig.width=14, fig.height=16, cache=FALSE, fig.show="hide"}
 # ============================================================================
 # Domain bar chart, refactored from facet_wrap to individual patchwork panels
 # to support: (1) custom legend in 8th position, (2) animal icons per panel,
@@ -3040,6 +3142,8 @@ domain_fig <- wrap_plots(c(covar_panels, list(legend_plot)), ncol = 2) +
 domain_fig
 ```
 
+Shown as Figure S7.8 under Key figures (Figure 3 in the main text).
+
 ```{r save-domain-figure, cache = FALSE}
 # cache = FALSE, stated explicitly, so the ggsave() side effect is re-executed
 # on every knit. Caching is off document-wide (see setup chunk); this is belt
@@ -3053,11 +3157,10 @@ cat("Domain bar chart saved to:", fig_dir, "\n")
 ```
 
 ```{r save-domain-outputs}
-# Save full classified data and summaries
-# Disabled for JAE submission, not used by S1–S6 or Dryad.
-# Re-enabled 2026-08-27: the Results report counts of profiles with multiple
+# Save full classified data and summaries.
+# The Results report counts of profiles with multiple
 # non-zero domains and of those sharing a common sign. Those counts are not
-# recoverable from the manuscript table, which collapses each profile to one
+# recoverable from the domain table, which collapses each profile to one
 # peak per sign, so the domain enumeration is exported to make them checkable.
 write_csv(domain_data %>%
             dplyr::select(species, period, covariate, extent_radius_m,
@@ -3112,7 +3215,7 @@ univ_data <- plot_data_clean %>%
 
 domain_data_uni <- univ_data %>%
   mutate(
-    # Domain sign based on 95% CI position relative to zero (same rule as §11.2)
+    # Domain sign based on 95% CI position relative to zero (same rule as §12.2)
     domain_sign = case_when(
       conf.low > 0  ~ "+",
       conf.high < 0 ~ "-",
@@ -3134,7 +3237,7 @@ domain_data_uni <- domain_data_uni %>%
 
 ```{r univar-domain-summary}
 # ── 3. Summarise each domain (univariate) ──
-# Parallel to domain_summary in §11.2; one row per species × period × predictor × domain_id.
+# Parallel to domain_summary in §12.2; one row per species × period × predictor × domain_id.
 domain_summary_uni <- domain_data_uni %>%
   group_by(species, period, covariate, domain_id, domain_sign) %>%
   summarise(
@@ -3155,7 +3258,7 @@ domain_summary_uni <- domain_data_uni %>%
 # ── Table render suppressed in SI ──
 # The univariate per-domain table runs to ~150 rows (all three species
 # at monthly resolution). The full scale-of-effect structure is shown
-# in the univariate domain bar chart (Key figures §1.3 / §11.5). Raw
+# in the univariate domain bar chart (Key figures §1.3 / §12.6). Raw
 # per-domain numbers are exported as domain_summary_univariate.csv.
 cat(sprintf("Univariate domain summary: %d rows (see domain_summary_univariate.csv for raw values).\n",
             nrow(domain_summary_uni)))
@@ -3163,7 +3266,7 @@ cat(sprintf("Univariate domain summary: %d rows (see domain_summary_univariate.c
 
 ```{r univar-peer-summary}
 # ── 4. CI-overlapping peer scales (univariate) ──
-# Mirrors the peer_summary logic in §11.2: within each non-zero domain,
+# Mirrors the peer_summary logic in §12.2: within each non-zero domain,
 # identify all buffer scales whose 95% CI overlaps the peak scale's 95% CI.
 # Two intervals [a1, b1] and [a2, b2] overlap iff a1 <= b2 AND a2 <= b1.
 domain_with_peak_uni <- domain_data_uni %>%
@@ -3195,7 +3298,7 @@ peer_summary_uni <- domain_with_peak_uni %>%
 # ── Table render suppressed in SI ──
 # The univariate per-domain peer-scales table runs to ~120 rows. CI-overlap
 # of peer scales with the peak scale is visualised as connecting brackets
-# in the univariate domain bar chart (Key figures §1.3 / §11.5). Raw list
+# in the univariate domain bar chart (Key figures §1.3 / §12.6). Raw list
 # of peer scales per domain is exported as domain_peer_scales_univariate.csv.
 cat(sprintf("Univariate peer-scale summary: %d domains with one or more CI-overlapping peer scales.\n",
             nrow(peer_summary_uni)))
@@ -3207,14 +3310,14 @@ Horizontal bars spanning the scale continuum, coloured by domain sign.
 Diamonds mark the peak scale of effect within each non-zero domain;
 coloured stars (★) mark the global peak; brackets connect peaks of
 same-sign split domains with overlapping CIs. Structure parallels the
-multivariate bar chart in §11.4, but the y-axis expands from 10
+multivariate bar chart in §12.5, but the y-axis expands from 10
 to 16 rows to accommodate monthly resolution for cattle (Jul–Oct) and
 elk (May–Oct).
 
-```{r univar-domain-bars, fig.width=14, fig.height=22, cache=FALSE}
+```{r univar-domain-bars, fig.width=14, fig.height=22, cache=FALSE, fig.show="hide"}
 # ============================================================================
-# Univariate domain bar chart, parallel to the multivariate Figure 2 (§11.4).
-# Reuses global objects from §11.4 (domain_pal, horse_img, cow_img, elk_img,
+# Univariate domain bar chart, parallel to the multivariate Figure 3 (§12.5).
+# Reuses global objects from §12.5 (domain_pal, horse_img, cow_img, elk_img,
 # scale_breaks, scale_break_labels, x_lims, icon_xmin, icon_xmax, legend_plot,
 # covar_labels) so the visual style is identical. Only the row ordering,
 # separator positions, icon y-anchors, and data objects differ.
@@ -3308,7 +3411,7 @@ bracket_data_uni <- peak_data_uni %>%
 sep_positions_uni <- c(6.5, 10.5)
 
 # ── Panel builder (univariate) ──
-# Mirrors build_domain_panel() from §11.4 but points to the _uni data objects
+# Mirrors build_domain_panel() from §12.5 but points to the _uni data objects
 # and uses the expanded species-group row midpoints for icon/annotation anchors:
 #   Elk rows    1–6   → centre 3.5  → icon ymin 2.5,  ymax 4.5
 #   Cattle rows 7–10  → centre 8.5  → icon ymin 7.8,  ymax 9.2
@@ -3379,7 +3482,7 @@ build_domain_panel_uni <- function(cv_label,
               aes(x = 30, y = row_label, label = period_text),
               hjust = 1, size = 3.0, colour = "black",
               inherit.aes = FALSE) +
-    # ── Animal silhouette icons (reused from §11.4, already tinted and transparent) ──
+    # ── Animal silhouette icons (reused from §12.5, already tinted and transparent) ──
     # Elk now bottom (rows 1–6), Horse now top (rows 11–16); Cattle unchanged.
     annotation_custom(
       grob = rasterGrob(elk_img, interpolate = TRUE),
@@ -3442,9 +3545,9 @@ covar_panels_uni <- lapply(seq_along(sorted_labels), function(i) {
   )
 })
 
-# ── Legend panel: reuse legend_plot from §11.4 (not species- or period-specific) ──
-# If §11.4 has not been run in the current session, legend_plot will not exist;
-# in that case knit from the top or run the domain-bars chunk in §11.4 first.
+# ── Legend panel: reuse legend_plot from §12.5 (not species- or period-specific) ──
+# If §12.5 has not been run in the current session, legend_plot will not exist;
+# in that case knit from the top or run the domain-bars chunk in §12.5 first.
 
 # ── Assemble with patchwork ──
 domain_fig_uni <- wrap_plots(c(covar_panels_uni, list(legend_plot)), ncol = 2) +
@@ -3457,6 +3560,8 @@ domain_fig_uni <- wrap_plots(c(covar_panels_uni, list(legend_plot)), ncol = 2) +
 
 domain_fig_uni
 ```
+
+Shown as Figure S7.9 under Key figures.
 
 ```{r save-univar-domain-figure, cache = FALSE}
 # cache = FALSE so the ggsave() side effect is re-executed on every knit.
@@ -3473,7 +3578,7 @@ cat("Univariate domain bar chart saved to:", fig_dir, "\n")
 # Save classified data and summaries for the univariate domain set,
 # parallel to the multivariate saves above. Filenames carry an
 # _univariate suffix so the multivariate outputs are not overwritten.
-# Disabled for JAE submission, not used by S1–S6 or Dryad.
+# Disabled: not used by S1–S6 or Dryad.
 # write_csv(domain_data_uni %>%
 #             dplyr::select(species, period, covariate, extent_radius_m,
 #                    estimate, std.error, conf.low, conf.high, p.value,
@@ -3604,17 +3709,17 @@ horse_compare <- inner_join(
 
 ```{r horse-within-domain-match}
 # ── Within-MV-domain peak-scale matching (Horse only) ──
-# For each of the 45 MV non-zero domains, locate the same-sign UNI
+# For each of the 43 MV non-zero domains, locate the same-sign UNI
 # domain in the same profile with the closest peak on the log-spaced
 # buffer grid, then test whether their peak scales coincide exactly
 # or within ±1 buffer class. This answers the per-domain (rather than
 # per-profile) scale-of-effect agreement question underlying the
 # Results sentence:
 #
-#   "UV scale of effect within each of the 45 domains that MV models
+#   "UV scale of effect within each of the 43 domains that MV models
 #    also detected agreed x% of the time (X% ±1 buffer)."
 #
-# Denominator = 45 MV non-zero domains (all MV non-zero domains count
+# Denominator = 43 MV non-zero domains (all MV non-zero domains count
 # against agreement, including the four MV-only profiles that have no
 # same-sign UNI counterpart and the one Sep p_wetland profile where
 # MV and UNI disagree in sign at the global peak). Reuse of a single
@@ -3849,10 +3954,9 @@ knitr::kable(
 ```{r save-horse-univariate-comparison}
 # ── Save outputs ──
 # CSVs only, no figure. Filenames use an _univariate_comparison suffix
-# so nothing from sections §11.2, §11.4, or §11.5 is overwritten.
-# Enabled 2026-08-31: the univariate-multivariate comparison is now reported as a
-# substantive result (Methods para 37, R1 items 5 and 20), so the numbers behind it
-# ship in the Dryad bundle.
+# so nothing from sections §12.2, §12.5, or §12.6 is overwritten.
+# The univariate-multivariate comparison is reported in the manuscript, so the
+# numbers behind it ship in the Dryad bundle.
 write_csv(horse_compare,
           file.path(output_dir, "horse_univariate_comparison_profiles.csv"))
 
@@ -3877,7 +3981,7 @@ cat("Horse univariate-multivariate comparison outputs saved to:",
 
 ## Top-ranked models by species-period and spatial extent
 
-`n_top_model` in Section 12.1 (Table 1 in the manuscript) counts the model runs whose AIC-best model
+`n_top_model` in Section 12.1 (Table 2 in the manuscript) counts the model runs whose AIC-best model
 contained a given predictor: 96 runs for horses (six months by 16 spatial extents) and 32 each for
 cattle and elk (two temporal periods by 16 extents). It is not the number of candidate models that
 contained the predictor.

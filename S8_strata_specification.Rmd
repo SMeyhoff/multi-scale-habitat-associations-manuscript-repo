@@ -308,8 +308,10 @@ extract_strata_sd <- function(mod) {
 # Model Configuration
 
 ```{r configuration}
-# Base predictor sets, taken verbatim from the S7 dredge output.
-# Confirm against Table 1 of the manuscript before interpreting results.
+# Base predictor sets selected under the random-intercept specification in the
+# original S7 run, held fixed for this comparison (see the scoping decisions above).
+# Manuscript Table 2 gives the selection under the fixed-effect specification, which
+# differs for cattle; the final section of this document re-runs the selection.
 base_covars <- list(
   Horse  = c("tri", "hu", "p_harvest", "p_wetland", "p_shrub"),
   Cattle = c("hu", "tri", "p_herb", "p_wetland"),
@@ -551,7 +553,7 @@ if (nrow(disagreements) > 0) {
 
 ## Coefficient profiles under both specifications
 
-```{r profile-figure, fig.height=12}
+```{r profile-figure, fig.height=12, fig.cap="**Figure S8.1.** Scale-of-effect profiles with stratum as a random intercept (blue) and as a fixed effect (orange; the specification used in the main analysis). Rows are predictors and columns species and period; lines are standardized coefficients (log-rate scale) across the 16 extents, with shaded 95% confidence intervals."}
 ggplot(results, aes(x = extent_radius_m, y = estimate,
                     colour = spec, fill = spec)) +
   geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
@@ -675,11 +677,11 @@ confounding_summary <- confounding %>%
 
 kable(confounding_summary, digits = 3,
       col.names = c("Species", "Predictor", "min R2", "median R2", "max R2"),
-      caption = "**Table S8.7.** Proportion of each habitat predictor's variance explained by stratum alone, summarised across the 16 spatial extents. Higher values indicate stronger confounding with the sampling stratification.") %>%
+      caption = "**Table S8.5.** Proportion of each habitat predictor's variance explained by stratum alone, summarised across the 16 spatial extents. Higher values indicate stronger confounding with the sampling stratification.") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
-```{r confounding-by-scale, fig.height=6}
+```{r confounding-by-scale, fig.height=6, fig.cap="**Figure S8.2.** Proportion of each habitat predictor's variance explained by sampling stratum (R²), by spatial extent and species."}
 ggplot(confounding %>% filter(term != "sac"),
        aes(x = extent_radius_m, y = r2_on_strata, colour = term)) +
   geom_line(linewidth = 0.7) +
@@ -727,7 +729,7 @@ vif_summary <- vif_covars %>%
   arrange(desc(inflation))
 
 kable(vif_summary, digits = 2,
-      caption = "**Table S8.8.** Variance inflation factors for the habitat predictors under each specification, summarised across the 16 spatial extents. The 'Random intercept' columns are the VIFs among the fixed effects when no stratum term is present. `inflation` is the ratio of median VIFs. Values above 5 are conventionally regarded as problematic.") %>%
+      caption = "**Table S8.6.** Variance inflation factors for the habitat predictors under each specification, summarised across the 16 spatial extents. The 'Random intercept' columns are the VIFs among the fixed effects when no stratum term is present. `inflation` is the ratio of median VIFs. Values above 5 are conventionally regarded as problematic.") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 
 cat("Max VIF for any habitat predictor, random-intercept design:",
@@ -744,7 +746,7 @@ vif_strata <- vif_results %>%
 
 kable(vif_strata, digits = 2,
       col.names = c("Species", "Median VIF", "Max VIF"),
-      caption = "**Table S8.9.** Variance inflation factors for the stratum dummy variables under the fixed-effect specification.") %>%
+      caption = "**Table S8.7.** Variance inflation factors for the stratum dummy variables under the fixed-effect specification.") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
@@ -764,7 +766,7 @@ se_comparison <- results %>%
 kable(se_comparison, digits = 3,
       col.names = c("Species", "Predictor", "Median SE (random)",
                     "Median SE (fixed)", "Ratio"),
-      caption = "**Table S8.10.** Median standard errors of the habitat predictors under each specification. A ratio above 1 means the fixed specification estimates that predictor less precisely.") %>%
+      caption = "**Table S8.8.** Median standard errors of the habitat predictors under each specification. A ratio above 1 means the fixed specification estimates that predictor less precisely.") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
@@ -797,7 +799,7 @@ dharma_results <- expand_grid(jobs, extent_radius_m = dharma_scales,
   })
 
 kable(dharma_results, digits = 3,
-      caption = paste0("**Table S8.5.** DHARMa diagnostic p-values at the ",
+      caption = paste0("**Table S8.9.** DHARMa diagnostic p-values at the ",
                        dharma_scales, " m extent under both specifications. ",
                        "Values below 0.05 indicate residual structure.")) %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
@@ -827,7 +829,7 @@ aic_tab <- results_raw %>%
 kable(aic_tab, digits = 2,
       col.names = c("Species", "Period", "Extents", "Median dAIC (fixed - random)",
                     "Random better (dAIC > 2)", "Fixed better (dAIC < -2)"),
-      caption = "**Table S8.6.** AIC comparison across spatial extents. Positive median dAIC favours the random-intercept specification.") %>%
+      caption = "**Table S8.10.** AIC comparison across spatial extents. Positive median dAIC favours the random-intercept specification.") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
@@ -1025,7 +1027,7 @@ and it is silent.
 
 **AIC prefers the fixed specification.** The median difference in AIC favours
 the fixed effect in `r n_fixed_favoured` of `r n_periods_total` species-period
-combinations, usually at all 16 spatial extents (Table S8.6). The fixed
+combinations, usually at all 16 spatial extents (Table S8.10). The fixed
 specification carries three more estimated parameters than the random one (four
 contrasts against one variance), so it wins these comparisons after being
 charged a six-unit penalty for them.
@@ -1035,10 +1037,10 @@ materialise.** All `r n_converged` of `r n_fits` fits converged under both
 specifications. No variance inflation factor for a habitat predictor exceeds
 `r round(vif_max_fixed, 2)` under the fixed specification against
 `r round(vif_max_random, 2)` under the random one, both below the
-conventional threshold of 5 (Table S8.8). Median standard errors are within 5%
+conventional threshold of 5 (Table S8.6). Median standard errors are within 5%
 of parity for `r n_se_parity` of `r n_se_total` species-predictor combinations,
 and `r n_se_better` are estimated more precisely under the fixed specification
-(Table S8.10).
+(Table S8.8).
 
 **The reported inference is largely preserved, and where it moves it moves at
 fine extents.** Of the `r n_profiles` species-period-predictor profiles,
@@ -1050,7 +1052,7 @@ estimates correlate at r = `r round(agreement$r_estimates, 3)` (Table S8.3).
 
 The changes are concentrated where the confounding is. Stratum explains a large
 share of the variance in proportion cutblock harvest and human use intensity at
-the finest extents and almost none beyond 3 km (Table S8.7), so
+the finest extents and almost none beyond 3 km (Table S8.5), so
 under the random intercept a stratum difference left unabsorbed had a fine-scale
 predictor available to attach itself to. That is the mechanism behind the
 profiles that change, and it is why broad-scale inference is unaffected: at

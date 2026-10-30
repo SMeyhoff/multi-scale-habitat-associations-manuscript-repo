@@ -16,13 +16,13 @@ output:
 
 PlanetScope imagery is susceptible to cloud and haze contamination that can produce anomalous NDVI values. We took advantage of our high temporal resolution by developing a temporal consistency algorithm that identifies anomalous pixels by comparing each bi-weekly mosaic to its temporal neighbours, using phenologically informed thresholds derived from the pooled 2022--2024 time series.
 
-The algorithm was implemented in Python (NumPy, rasterio) and applied to all PlanetScope NDVI mosaics prior to extraction of camera-level summaries. The full processing script is available at `Python/phase2_cloud_filtering.ipynb`.
+The algorithm was implemented in Python 3.11 using NumPy (Harris et al. 2020), pandas (McKinney 2010), rasterio (Gillies et al. 2013–) and GeoPandas (Fleischmann et al. 2026), and applied to all PlanetScope NDVI mosaics prior to extraction of camera-level summaries. The full processing script is available at `Python/phase2_cloud_filtering.ipynb`.
 
 ## Algorithm Steps
 
 ### Step 1: Bi-weekly Mosaics on a Common Grid
 
-All raw PlanetScope NDVI scenes within each bi-weekly period (e.g., May 01--15, May 16--31, ..., Oct 16--31) were reprojected to a common reference grid defined by the union of annual Hermosilla et al. (2018, 2020) landcover extents (EPSG:3400 [NAD 1983 10TM AEP Forest], 3 m resolution matching PlanetScope's native pixel size). Within each period, multiple scenes were composited by maximum-value aggregation: this is a standard NDVI compositing technique in which the highest observed value at each pixel across the period is retained. Because residual cloud and haze contamination systematically depress NDVI, the per-pixel maximum approximates the cloud-free value and is the more defensible choice than mean or median aggregation for pre-filtering mosaics. NDVI values were subsequently clipped to [0, 1] to exclude non-vegetation surfaces (e.g., water bodies with negative NDVI) from downstream anomaly detection. Pixels falling outside the landcover mask for the corresponding year were set to `NaN`.
+All raw PlanetScope NDVI scenes within each bi-weekly period (e.g., May 01--15, May 16--31, ..., Oct 16--31) were reprojected to a common reference grid defined by the union of annual Hermosilla et al. (2018, 2022) landcover extents (EPSG:3400 [NAD 1983 10TM AEP Forest], 3 m resolution matching PlanetScope's native pixel size). Within each period, multiple scenes were composited by maximum-value aggregation: this is a standard NDVI compositing technique in which the highest observed value at each pixel across the period is retained. Because residual cloud and haze contamination systematically depress NDVI, the per-pixel maximum approximates the cloud-free value and is the more defensible choice than mean or median aggregation for pre-filtering mosaics. NDVI values were subsequently clipped to [0, 1] to exclude non-vegetation surfaces (e.g., water bodies with negative NDVI) from downstream anomaly detection. Pixels falling outside the landcover mask for the corresponding year were set to `NaN`.
 
 ### Step 2: Temporal Differences and Phenological Categorisation
 
@@ -64,3 +64,17 @@ For the first period in each year, only forward comparison was available; for th
 ### Step 5: Output
 
 Filtered mosaics were saved in the same format and grid as the input mosaics, with cloud-contaminated pixels set to `NaN`. Downstream NDVI extraction (camera-level buffer summaries) used only non-`NaN` pixels, ensuring that cloud-affected areas did not contribute to habitat predictor values.
+
+## References
+
+Fleischmann, M., Van den Bossche, J., Jordahl, K., Richards, M.J., McBride, J., Wasserman, J., Ward, B. & Wolf, L.J. (2026) GeoPandas: fundamental data structures for vector spatial data in Python. *Computers, Environment and Urban Systems*, 130, 102495. https://doi.org/10.1016/j.compenvurbsys.2026.102495
+
+Gillies, S. et al. (2013–) Rasterio: geospatial raster I/O for Python programmers. Mapbox. https://github.com/rasterio/rasterio
+
+Harris, C.R., Millman, K.J., van der Walt, S.J. et al. (2020) Array programming with NumPy. *Nature*, 585, 357–362. https://doi.org/10.1038/s41586-020-2649-2
+
+Hermosilla, T., Wulder, M.A., White, J.C., Coops, N.C. & Hobart, G.W. (2018) Disturbance-informed annual land cover classification maps of Canada's forested ecosystems for a 29-year Landsat time series. *Canadian Journal of Remote Sensing*, 44, 67–87. https://doi.org/10.1080/07038992.2018.1437719
+
+Hermosilla, T., Wulder, M.A., White, J.C. & Coops, N.C. (2022) Land cover classification in an era of big and open data: optimizing localized implementation and transferability. *Remote Sensing of Environment*, 268, 112780. https://doi.org/10.1016/j.rse.2021.112780
+
+McKinney, W. (2010) Data structures for statistical computing in Python. *Proceedings of the 9th Python in Science Conference*, 56–61. https://doi.org/10.25080/Majora-92bf1922-00a

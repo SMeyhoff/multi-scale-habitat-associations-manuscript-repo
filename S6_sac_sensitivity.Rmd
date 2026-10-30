@@ -194,9 +194,8 @@ fit_nb_glmm <- function(data, covars, scale_m, sac_var = "sac") {
   for (v in vars_to_scale) {
     if (v %in% names(d)) d[[v]] <- as.numeric(scale(d[[v]]))
   }
-  # Habitat stratum is a FIXED effect (changed 2026-08-27 in response to
-  # Reviewer 1 item 16; justification in Supporting Information S8). Matches
-  # the specification used in S7.
+  # Habitat stratum is a FIXED effect (justification in Supporting
+  # Information S8). Matches the specification used in S7.
   fixed_terms <- paste(c(covars, sac_var), collapse = " + ")
   form <- as.formula(paste0("n_det ~ ", fixed_terms, " + strata + offset(log_effort)"))
   tryCatch(glmmTMB(form, data = d, family = nbinom2), error = function(e) NULL)
