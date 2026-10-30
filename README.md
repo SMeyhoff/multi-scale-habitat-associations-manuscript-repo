@@ -113,7 +113,7 @@ All Rmds use relative paths (`input/filename.csv`), so the files are picked up a
 
 ### 2. R environment
 
-The analysis was run in **R 4.5.2** on Windows. The CRAN packages required to knit all eight Rmds:
+The analysis was run in **R 4.6.1** on Windows; the package versions used are listed in the session information at the end of S7 (`S7_Main_analysis.html`). The CRAN packages required to knit all eight Rmds:
 
 ```r
 install.packages(c(
@@ -162,7 +162,7 @@ If you would rather not re-knit, the rendered HTML for all eight documents is pr
 
 ## A note on the Python pipeline
 
-The three notebooks in `Python/` document the upstream PlanetScope processing that produced the monthly NDVI rasters used to compute the buffer-averaged `NDVI_herb` values in `analysis_ready_multiscale.csv`. They require raw PlanetScope imagery (not provided: proprietary data licensed from Planet Labs) and a geospatial Python stack including `rasterio`, `numpy`, `pandas`, and `geopandas`.
+The three notebooks in `Python/` document the upstream PlanetScope processing that produced the monthly NDVI rasters used to compute the buffer-averaged `NDVI_herb` values in `analysis_ready_multiscale.csv`. They require raw PlanetScope imagery (not provided: proprietary data licensed from Planet Labs) and a geospatial Python stack (Python 3.11) including `rasterio`, `numpy`, `pandas`, and `geopandas`.
 
 The notebooks are included for **methodological transparency**: they let a reader inspect how the cloud filter described in S1 is implemented in code. They are **not part of the reproducibility workflow** for the manuscript models, because the buffer-averaged NDVI values are already computed and stored in the Dryad CSVs.
 
