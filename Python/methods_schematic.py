@@ -18,7 +18,8 @@ REPRODUCIBILITY
         output/scale_analysis/domain_classification_full.csv
 
     If the file is absent the script falls back to values embedded below, which
-    were taken from the 2026-08-31 knit. When the file IS present the script
+    were taken from the knit of S7_Main_analysis.Rmd that produced the published
+    figures. When the file IS present the script
     compares the two and stops if they disagree, so a silent drift between the
     figure and the analysis is not possible.
 
@@ -62,7 +63,7 @@ CSV_PATH = os.path.join(
     "..", "output", "scale_analysis", "domain_classification_full.csv",
 )
 
-# Fallback values, transcribed from the 2026-08-31 knit. Each tuple is
+# Fallback values, transcribed from the published S7 knit. Each tuple is
 # (buffer radius in m, standardised coefficient, domain sign) and `CI_FALLBACK`
 # holds the 95% confidence limits keyed by radius. Domain sign is '+' or '-'
 # where the interval excludes zero in a consistent direction, '0' otherwise.
@@ -93,7 +94,7 @@ def load_profile(path=CSV_PATH):
     """
     if not os.path.exists(path):
         sys.stderr.write(
-            "NOTE: %s not found; using the embedded 2026-08-31 values.\n" % path
+            "NOTE: %s not found; using the embedded values.\n" % path
         )
         return PROF_FALLBACK, CI_FALLBACK
 
@@ -122,7 +123,7 @@ def load_profile(path=CSV_PATH):
     for (m, est, sign), (fm, fest, fsign) in zip(prof, PROF_FALLBACK):
         if sign != fsign or abs(est - fest) > 0.0015:
             raise SystemExit(
-                "Profile has changed since 2026-08-31 (extent %d m: %s %.3f vs "
+                "Profile differs from the embedded values (extent %d m: %s %.3f vs "
                 "embedded %s %.3f). Update PROF_FALLBACK/CI_FALLBACK after "
                 "confirming the new knit is the one you want to publish." % (m, sign, est, fsign, fest)
             )
@@ -152,7 +153,7 @@ W,H=1123,794
 # sides. Nothing inside the figure moves; only the visible canvas changes.
 #
 # CONTENT_* is the ink bounding box in user units, measured from a 1:1 render
-# (cairosvg at output_width=1123) on 2026-09-03: x 13.35 to 1102.65 (Data
+# (cairosvg at output_width=1123): x 13.35 to 1102.65 (Data
 # sources box edge to the right edge of the result panel), y 75.35 to 690.5
 # (top of the upper box row to the last footnote line). Stroke widths included.
 # Y1 tracks gy below: it is the second footnote baseline, gy + 46, plus descender.
@@ -198,8 +199,8 @@ def _icon_uri(path, colour):
       3. the silhouette is filled with the species colour.
 
     Step 1 matters for the elk: its PNG has opaque near-white pixels between
-    the antler tines. Tinting by alpha alone (the approach used until
-    2026-09-15) filled that gap in as a blotch.
+    the antler tines. Tinting by alpha alone would fill that gap in as a
+    blotch.
 
     Requires Pillow. Without it the icon is embedded unchanged and renders as a
     black silhouette (with the same antler blotch): the figure is still
@@ -436,9 +437,8 @@ arrow([(X3+CW,TOPY+55),(RX-6,TOPY+55)],A_RES)
 # ---------------- legend + caption ----------------
 # gy is the baseline of the legend labels; the swatches sit at gy-9.
 # The deepest box (Spatial extraction) ends at y = 607, so this leaves a 25 px
-# clear band. It was 76 px until 2026-09-03, when two-thirds of that white space
-# was removed to shorten the figure for page fit. If a box row gets deeper,
-# raise this or the legend will collide with it.
+# clear band, kept narrow so the figure fits the page. If a box row gets
+# deeper, raise this or the legend will collide with it.
 gy=643
 LEGEND=[(F_DATA,EDGE,'Data'),(F_SPEC,S_SPEC,'Analytical step'),
         (F_MF,S_MF,'Analysis'),(F_RES,A_RES,'Result')]
