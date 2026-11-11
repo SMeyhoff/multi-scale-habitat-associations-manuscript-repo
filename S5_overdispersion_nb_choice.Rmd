@@ -1,7 +1,7 @@
 ---
 title: "Supporting Information S5: Overdispersion Diagnostics and Negative Binomial Model Selection"
 subtitle: "Spatiotemporal dynamics in scale of effect: multi-scale habitat associations of three large grazers across the growing season"
-author: "anon"
+author: "Sejer Meyhoff, Juan Andrés Martínez-Lanfranco, Isabelle Lebeuf-Taylor, Elly Knight, Erin Bayne"
 date: "`r Sys.Date()`"
 output:
   html_document:

@@ -1,17 +1,19 @@
 # Code and Supporting Information: **Spatiotemporal dynamics in scale of effect: multi-scale habitat associations of three large grazers across the growing season**
 
-**Manuscript under double-anonymous peer review.** Author names, affiliations, and acknowledgements have been removed from all files in this repository. They will be restored in the published version.
+**Authors:** Sejer Meyhoff, Juan Andrés Martínez-Lanfranco, Isabelle Lebeuf-Taylor, Elly Knight, Erin Bayne (Department of Biological Sciences, University of Alberta; Elly Knight, Alberta Biodiversity Monitoring Institute). Contact: Sejer Meyhoff, meyhoff@ualberta.ca.
+
+**Article:** accepted for publication in *Journal of Animal Ecology* (2026).
 
 ---
 
 ## Overview
 
-This repository contains the full analytical workflow supporting the manuscript. It is organized as eight self-contained R Markdown supporting-information documents (S1 to S8), three Jupyter notebooks that document the upstream PlanetScope NDVI processing pipeline, and the script that draws the methods schematic.
+This repository contains the full analytical workflow supporting the article. It is organized as eight self-contained R Markdown supporting-information documents (S1 to S8), three Jupyter notebooks that document the upstream PlanetScope NDVI processing pipeline, and the script that draws the methods schematic.
 
 - **S1 to S6** are short, focused supplements that each address one methodological issue (temporal consistency of the NDVI cloud filter, NDVI and biomass validation, predictor screening and budgets, year-agnosticism of the model structure, the negative binomial choice, and spatial autocorrelation sensitivity).
 - **S7** is the main analytical workflow: predictor construction, multivariate negative binomial GLMs across 16 buffer radii, scale-of-effect profiling, and the manuscript's result figures and tables.
 - **S8** reports the sensitivity of scale-of-effect inference to specifying the vegetation stratum term as a fixed rather than a random effect. The fixed effect is the specification used throughout the manuscript.
-- **Python/** contains two unrelated things. The three Jupyter notebooks are the NDVI pre-processing pipeline that produced the bi-weekly mosaics upstream of this analysis; they are included for transparency only, because the buffer-averaged NDVI values are already computed in `analysis_ready_multiscale.csv`. `methods_schematic.py` generates the manuscript's methods schematic (Figure 2; see "Regenerating the methods schematic" below).
+- **Python/** contains two unrelated things. The three Jupyter notebooks are the NDVI pre-processing pipeline that produced the bi-weekly mosaics upstream of this analysis; they are included for transparency only, because the buffer-averaged NDVI values are already computed in `analysis_ready_multiscale.csv`. `methods_schematic.py` generates the article's methods schematic (Figure 2; see "Regenerating the methods schematic" below).
 
 ---
 
@@ -164,21 +166,9 @@ If you would rather not re-knit, the rendered HTML for all eight documents is pr
 
 The three notebooks in `Python/` document the upstream PlanetScope processing that produced the monthly NDVI rasters used to compute the buffer-averaged `NDVI_herb` values in `analysis_ready_multiscale.csv`. They require raw PlanetScope imagery (not provided: proprietary data licensed from Planet Labs) and a geospatial Python stack (Python 3.11) including `rasterio`, `numpy`, `pandas`, and `geopandas`.
 
-The notebooks are included for **methodological transparency**: they let a reader inspect how the cloud filter described in S1 is implemented in code. They are **not part of the reproducibility workflow** for the manuscript models, because the buffer-averaged NDVI values are already computed and stored in the Dryad CSVs.
+The notebooks are included for **methodological transparency**: they let a reader inspect how the cloud filter described in S1 is implemented in code. They are **not part of the reproducibility workflow** for the article's models, because the buffer-averaged NDVI values are already computed and stored in the Dryad CSVs.
 
 Absolute paths to the original network workspace have been replaced with a generic `<PROJECT_ROOT>/` token.
-
----
-
-## Anonymisation
-
-This repository has been scrubbed for author identifiers prior to submission:
-
-- All R Markdown `author:` fields are set to `"anon"`.
-- Acknowledgements, funder identifiers, and affiliations have been removed.
-- Python notebook paths have been sanitised (institutional network prefixes replaced with `<PROJECT_ROOT>/`).
-
-After acceptance, the anonymised code will be replaced with a fully attributed permanent archive (author names, ORCIDs, acknowledgements, funder IDs, and a DOI).
 
 ---
 
@@ -194,6 +184,6 @@ After acceptance, the anonymised code will be replaced with a fully attributed p
 
 Please cite both the article and the data archive:
 
-- **Article:** `[CITATION_PLACEHOLDER: to be inserted after acceptance]`
-- **Data:** DOI: 10.5061/dryad.vhhmgqp8k (active on publication). Reviewer sharing link during peer review: http://datadryad.org/share/LINK_NOT_FOR_PUBLICATION/VSjDtKdBqWdCQeGWt84vPhkWPZz_gFRM6nHsGV0skgU
-- **Code:** anonymous peer-review mirror at https://anonymous.4open.science/r/multi-scale-habitat-associations-manuscript-repo-72C3/ ; `[PERMANENT_ARCHIVE_DOI_PLACEHOLDER]` (post-acceptance)
+- **Article:** Meyhoff, S., Martínez-Lanfranco, J. A., Lebeuf-Taylor, I., Knight, E., & Bayne, E. (2026). Spatiotemporal dynamics in scale of effect: multi-scale habitat associations of three large grazers across the growing season. *Journal of Animal Ecology*.
+- **Data:** Meyhoff, S., Martínez-Lanfranco, J. A., Lebeuf-Taylor, I., Knight, E., & Bayne, E. (2026). Data for: Spatiotemporal dynamics in scale of effect: multi-scale habitat associations of three large grazers across the growing season. Dryad Digital Repository. https://doi.org/10.5061/dryad.vhhmgqp8k
+- **Code:** this repository, https://github.com/SMeyhoff/multi-scale-habitat-associations-manuscript-repo. Each release is archived on Zenodo; the Zenodo record gives the DOI to cite for the version used.

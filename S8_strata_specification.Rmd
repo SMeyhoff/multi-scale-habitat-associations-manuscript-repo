@@ -1,7 +1,7 @@
 ---
 title: "Supporting Information S8: Habitat Stratum as a Fixed vs. Random Effect"
 subtitle: "Sensitivity of scale-of-effect inference to the specification of the stratum term"
-author: "anon"
+author: "Sejer Meyhoff, Juan Andrés Martínez-Lanfranco, Isabelle Lebeuf-Taylor, Elly Knight, Erin Bayne"
 date: "`r Sys.Date()`"
 output:
   html_document:
