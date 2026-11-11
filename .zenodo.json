@@ -1,0 +1,17 @@
+{
+  "title": "Code for: Spatiotemporal dynamics in scale of effect: multi-scale habitat associations of three large grazers across the growing season",
+  "upload_type": "software",
+  "description": "R Markdown and Python code that reproduces every analysis, figure and Supporting Information document in the article. The data are archived on Dryad (https://doi.org/10.5061/dryad.vhhmgqp8k).",
+  "creators": [
+    {"name": "Meyhoff, Sejer", "affiliation": "Department of Biological Sciences, University of Alberta"},
+    {"name": "Martínez-Lanfranco, Juan Andrés", "affiliation": "Department of Biological Sciences, University of Alberta"},
+    {"name": "Lebeuf-Taylor, Isabelle", "affiliation": "Department of Biological Sciences, University of Alberta"},
+    {"name": "Knight, Elly", "affiliation": "Alberta Biodiversity Monitoring Institute, University of Alberta"},
+    {"name": "Bayne, Erin", "affiliation": "Department of Biological Sciences, University of Alberta"}
+  ],
+  "license": "MIT",
+  "keywords": ["camera traps", "domains of scale", "grazing", "habitat association", "multi-scale", "scale of effect", "temporal dynamics", "ungulates"],
+  "related_identifiers": [
+    {"identifier": "10.5061/dryad.vhhmgqp8k", "relation": "references", "scheme": "doi"}
+  ]
+}
